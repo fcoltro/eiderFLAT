@@ -56,13 +56,12 @@ pub fn mirror(doc: &mut Document, ids: &[EntityId], p0: &Point2d, p1: &Point2d, 
 pub fn offset(doc: &mut Document, ids: &[EntityId], dist: f64) -> Vec<EntityId> {
     let mut new_ids = Vec::new();
     for &id in ids {
-        if let Some(e) = doc.get(id) {
-            if let Some(c) = e.as_curve() {
+        if let Some(e) = doc.get(id)
+            && let Some(c) = e.as_curve() {
                 let off = offset_curve(c, dist);
                 let layer = e.layer;
                 new_ids.push(doc.add_on_layer(EntityKind::Curve(off), layer));
             }
-        }
     }
     new_ids
 }
@@ -760,8 +759,8 @@ fn arc_endpoint_nearer(a: &ArcSnap, px: f64, py: f64) -> bool {
 
 fn set_arc_endpoint(doc: &mut Document, id: EntityId, set_end: bool, new_angle: f64) -> bool {
     let tau = std::f64::consts::TAU;
-    if let Some(e) = doc.get_mut(id) {
-        if let EntityKind::Curve(Curve::Arc(arc)) = &mut e.kind {
+    if let Some(e) = doc.get_mut(id)
+        && let EntityKind::Curve(Curve::Arc(arc)) = &mut e.kind {
             if set_end {
                 let mut a = new_angle;
                 while a <= arc.start_angle { a += tau; }
@@ -775,7 +774,6 @@ fn set_arc_endpoint(doc: &mut Document, id: EntityId, set_end: bool, new_angle: 
             }
             return true;
         }
-    }
     false
 }
 
@@ -850,12 +848,11 @@ fn line_endpoints(doc: &Document, id: EntityId) -> Option<LineData> {
 }
 
 fn set_line_endpoint(doc: &mut Document, id: EntityId, which_p1: bool, x: f64, y: f64) -> bool {
-    if let Some(e) = doc.get_mut(id) {
-        if let EntityKind::Curve(Curve::Line(l)) = &mut e.kind {
+    if let Some(e) = doc.get_mut(id)
+        && let EntityKind::Curve(Curve::Line(l)) = &mut e.kind {
             if which_p1 { l.p1 = Point2d::from_f64(x, y); } else { l.p0 = Point2d::from_f64(x, y); }
             return true;
         }
-    }
     false
 }
 

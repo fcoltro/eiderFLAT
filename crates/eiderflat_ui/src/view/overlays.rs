@@ -68,15 +68,13 @@ pub(super) fn dyn_circle_hud(ctx: &egui::Context, app: &mut AppState, ui_state: 
         let first_show = !ui_state.dyn_circle_active;
         if first_show { ui_state.dyn_radius.clear(); }
         ui_state.dyn_circle_active = true;
-        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Ok(rad) = ui_state.dyn_radius.trim().parse::<f64>() {
-                if rad > 1e-9 {
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter))
+            && let Ok(rad) = ui_state.dyn_radius.trim().parse::<f64>()
+                && rad > 1e-9 {
                     app.place_tool_point(Point2d::from_f64(cx + rad, cy));
                     ui_state.dyn_circle_active = false;
                     return;
                 }
-            }
-        }
 
         let cur = app.view.world_to_screen(crx, cry);
         let hud_pos = pos2(origin.x + cur.0 as f32 + 18.0, origin.y + cur.1 as f32 - 38.0);
@@ -156,9 +154,8 @@ pub(super) fn dyn_rect_hud(ctx: &egui::Context, app: &mut AppState, ui_state: &m
         let mut focus_field = first_show;
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             if !ui_state.dyn_rect_stage_h {
-                if let Ok(w) = ui_state.dyn_rect_width.trim().parse::<f64>() {
-                    if w.abs() > 1e-9 { ui_state.dyn_rect_stage_h = true; focus_field = true; }
-                }
+                if let Ok(w) = ui_state.dyn_rect_width.trim().parse::<f64>()
+                    && w.abs() > 1e-9 { ui_state.dyn_rect_stage_h = true; focus_field = true; }
             } else if let Ok(h) = ui_state.dyn_rect_height.trim().parse::<f64>() {
                 let w = ui_state.dyn_rect_width.trim().parse::<f64>().unwrap_or(0.0);
                 if h.abs() > 1e-9 && w.abs() > 1e-9 {
@@ -221,8 +218,8 @@ pub(super) fn dyn_ellipse_hud(ctx: &egui::Context, app: &mut AppState, ui_state:
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             match axis_end {
                 None => {
-                    if let Ok(maj) = ui_state.dyn_ell_major.trim().parse::<f64>() {
-                        if maj.abs() > 1e-9 {
+                    if let Ok(maj) = ui_state.dyn_ell_major.trim().parse::<f64>()
+                        && maj.abs() > 1e-9 {
                             let dir = (crx - center.0, cry - center.1);
                             let len = (dir.0 * dir.0 + dir.1 * dir.1).sqrt();
                             let (ux, uy) = if len > 1e-9 { (dir.0 / len, dir.1 / len) } else { (1.0, 0.0) };
@@ -230,11 +227,10 @@ pub(super) fn dyn_ellipse_hud(ctx: &egui::Context, app: &mut AppState, ui_state:
                             ui_state.dyn_ell_active = false;
                             committed = true;
                         }
-                    }
                 }
                 Some(a_end) => {
-                    if let Ok(minr) = ui_state.dyn_ell_minor.trim().parse::<f64>() {
-                        if minr.abs() > 1e-9 {
+                    if let Ok(minr) = ui_state.dyn_ell_minor.trim().parse::<f64>()
+                        && minr.abs() > 1e-9 {
                             let dir = (a_end.0 - center.0, a_end.1 - center.1);
                             let len = (dir.0 * dir.0 + dir.1 * dir.1).sqrt().max(1e-12);
                             let (px, py) = (-dir.1 / len, dir.0 / len);
@@ -242,7 +238,6 @@ pub(super) fn dyn_ellipse_hud(ctx: &egui::Context, app: &mut AppState, ui_state:
                             ui_state.dyn_ell_active = false;
                             committed = true;
                         }
-                    }
                 }
             }
         }
@@ -304,13 +299,11 @@ pub(super) fn dyn_offset_hud(ctx: &egui::Context, app: &mut AppState, ui_state: 
                 });
             });
         ui_state.dyn_offset_active = true;
-        if let Ok(d) = ui_state.dyn_offset_dist.trim().parse::<f64>() {
-            if d > 1e-9 {
-                if let Tool::Offset { source, .. } = &app.tool {
+        if let Ok(d) = ui_state.dyn_offset_dist.trim().parse::<f64>()
+            && d > 1e-9
+                && let Tool::Offset { source, .. } = &app.tool {
                     app.tool = Tool::Offset { dist: d, source: *source };
                 }
-            }
-        }
     } else {
         ui_state.dyn_offset_active = false;
     }
@@ -340,11 +333,10 @@ pub(super) fn dyn_text_hud(ctx: &egui::Context, app: &mut AppState, ui_state: &m
                         let dv = ui
                             .add(egui::DragValue::new(&mut size).speed(0.05).range(0.1..=1e6))
                             .on_hover_text("Text height");
-                        if dv.changed() {
-                            if let Tool::Text { height, .. } = &mut app.tool {
+                        if dv.changed()
+                            && let Tool::Text { height, .. } = &mut app.tool {
                                 *height = size;
                             }
-                        }
                         let nothing_focused = ui.ctx().memory(|m| m.focused().is_none());
                         if first_show || nothing_focused { te.request_focus(); }
                         if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }

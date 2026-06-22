@@ -1409,11 +1409,10 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                     ui.color_edit_button_srgb(&mut c).changed()
                 })
                 .inner;
-            if changed {
-                if let Some(l) = app.document.layers.get_mut(i) {
+            if changed
+                && let Some(l) = app.document.layers.get_mut(i) {
                     l.color = (c[0], c[1], c[2]);
                 }
-            }
 
             // Right cluster: count · eye · trash.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1431,11 +1430,10 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                     }
                 });
                 let icon = if on { Icon::Eye } else { Icon::EyeOff };
-                if icon_button_sized(ui, icon, "Show / hide this layer", false, 36.0).clicked() {
-                    if let Some(l) = app.document.layers.get_mut(i) {
+                if icon_button_sized(ui, icon, "Show / hide this layer", false, 36.0).clicked()
+                    && let Some(l) = app.document.layers.get_mut(i) {
                         l.on = !on;
                     }
-                }
                 ui.add_space(10.0);
                 ui.label(
                     egui::RichText::new(format!("{count:>2}"))
@@ -1454,16 +1452,15 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                         .text_color(name_col)
                         .font(egui::TextStyle::Monospace),
                 );
-                if resp.changed() {
-                    if let Some(l) = app.document.layers.get_mut(i) {
+                if resp.changed()
+                    && let Some(l) = app.document.layers.get_mut(i) {
                         l.name = buf;
                     }
-                }
             });
         });
     }
-    if let Some(idx) = delete_layer {
-        if idx != 0 && idx != app.document.layers.current {
+    if let Some(idx) = delete_layer
+        && idx != 0 && idx != app.document.layers.current {
             let lname = app.document.layers.layers[idx].name.clone();
             app.history.snapshot(&app.document);
             let ids: Vec<_> = app.document.iter().map(|e| e.id).collect();
@@ -1478,7 +1475,6 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
             }
             let _ = app.document.layers.delete(&lname);
         }
-    }
 }
 
 /// Floating contextual toolbar shown just above a single selected entity.
@@ -1934,12 +1930,11 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
 
             if changed {
                 app.history.snapshot(&app.document);
-                if let Some(e) = app.document.get_mut(id) {
-                    if let EntityKind::Curve(Curve::Line(ref mut l)) = e.kind {
+                if let Some(e) = app.document.get_mut(id)
+                    && let EntityKind::Curve(Curve::Line(ref mut l)) = e.kind {
                         l.p0 = Point2d::from_f64(p0x, p0y);
                         l.p1 = Point2d::from_f64(p1x, p1y);
                     }
-                }
             }
         }
         EntityKind::Curve(Curve::Arc(arc)) => {
@@ -1969,8 +1964,8 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
 
             if changed {
                 app.history.snapshot(&app.document);
-                if let Some(e) = app.document.get_mut(id) {
-                    if let EntityKind::Curve(Curve::Arc(ref mut a)) = e.kind {
+                if let Some(e) = app.document.get_mut(id)
+                    && let EntityKind::Curve(Curve::Arc(ref mut a)) = e.kind {
                         a.center = Point2d::from_f64(cx, cy);
                         a.radius = r.max(0.001);
                         if !is_circle {
@@ -1978,7 +1973,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
                             a.end_angle = ea.to_radians();
                         }
                     }
-                }
             }
         }
         EntityKind::Text {
@@ -2018,8 +2012,8 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
 
             if changed {
                 app.history.snapshot(&app.document);
-                if let Some(e) = app.document.get_mut(id) {
-                    if let EntityKind::Text {
+                if let Some(e) = app.document.get_mut(id)
+                    && let EntityKind::Text {
                         anchor: ref mut a,
                         content: ref mut c,
                         height: ref mut ht,
@@ -2033,7 +2027,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
                         *rot_rad = rot.to_radians();
                         *f = chosen_font;
                     }
-                }
             }
         }
         EntityKind::Point(pt) => {
@@ -2047,11 +2040,10 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
 
             if changed {
                 app.history.snapshot(&app.document);
-                if let Some(e) = app.document.get_mut(id) {
-                    if let EntityKind::Point(ref mut p) = e.kind {
+                if let Some(e) = app.document.get_mut(id)
+                    && let EntityKind::Point(ref mut p) = e.kind {
                         *p = Point2d::from_f64(px, py);
                     }
-                }
             }
         }
         EntityKind::Curve(Curve::Ellipse(el)) => {
@@ -2087,8 +2079,8 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
 
             if changed {
                 app.history.snapshot(&app.document);
-                if let Some(e) = app.document.get_mut(id) {
-                    if let EntityKind::Curve(Curve::Ellipse(ref mut a)) = e.kind {
+                if let Some(e) = app.document.get_mut(id)
+                    && let EntityKind::Curve(Curve::Ellipse(ref mut a)) = e.kind {
                         a.center = Point2d::from_f64(cx, cy);
                         a.semi_major = major.max(0.001);
                         a.semi_minor = minor.max(0.001);
@@ -2098,7 +2090,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
                             a.end_angle = ea.to_radians();
                         }
                     }
-                }
             }
         }
         EntityKind::Curve(Curve::Poly(pc)) => {
@@ -2153,11 +2144,10 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
                             Point2d::from_f64(b.0, b.1),
                         )));
                     }
-                    if let Some(e) = app.document.get_mut(id) {
-                        if let EntityKind::Curve(Curve::Poly(ref mut p)) = e.kind {
+                    if let Some(e) = app.document.get_mut(id)
+                        && let EntityKind::Curve(Curve::Poly(ref mut p)) = e.kind {
                             **p = eiderflat_geometry::PolyCurve::new(new_segs);
                         }
-                    }
                 }
             }
         }
@@ -2166,11 +2156,10 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_doc
             let mut pat = *pattern;
             if hatch_pattern_editor(ui, &mut pat) {
                 app.history.snapshot(&app.document);
-                if let Some(e) = app.document.get_mut(id) {
-                    if let EntityKind::Hatch { pattern: ref mut p, .. } = e.kind {
+                if let Some(e) = app.document.get_mut(id)
+                    && let EntityKind::Hatch { pattern: ref mut p, .. } = e.kind {
                         *p = pat;
                     }
-                }
                 app.hatch_pattern = pat;
             }
         }

@@ -157,8 +157,8 @@ impl Document {
     }
 
     pub fn explode_insert(&self, insert: &Entity) -> Vec<Entity> {
-        if let EntityKind::Insert { block, transform } = &insert.kind {
-            if let Some(b) = self.blocks.get(block) {
+        if let EntityKind::Insert { block, transform } = &insert.kind
+            && let Some(b) = self.blocks.get(block) {
                 return b.entities.iter().map(|e| {
                     let mut copy = e.clone();
                     copy.transform(transform);
@@ -166,7 +166,6 @@ impl Document {
                     copy
                 }).collect();
             }
-        }
         vec![]
     }
 }

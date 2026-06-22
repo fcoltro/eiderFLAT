@@ -202,9 +202,8 @@ fn parse_entity<'a>(
             let count: usize = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0);
             let mut segs = Vec::new();
             for _ in 0..count {
-                if let Some(segline) = lines.next() {
-                    if let Some(seg) = parse_segment(segline.trim()) { segs.push(seg); }
-                }
+                if let Some(segline) = lines.next()
+                    && let Some(seg) = parse_segment(segline.trim()) { segs.push(seg); }
             }
             Some(EntityKind::Curve(Curve::Poly(Box::new(PolyCurve::new(segs)))))
         }
@@ -215,9 +214,8 @@ fn parse_entity<'a>(
             let read_segs = |lines: &mut std::iter::Peekable<std::str::Lines>, n: usize| {
                 let mut v = Vec::new();
                 for _ in 0..n {
-                    if let Some(line) = lines.next() {
-                        if let Some(seg) = parse_segment(line.trim()) { v.push(seg); }
-                    }
+                    if let Some(line) = lines.next()
+                        && let Some(seg) = parse_segment(line.trim()) { v.push(seg); }
                 }
                 v
             };

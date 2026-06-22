@@ -2,7 +2,7 @@
 publish = false
 name = "eiderflat_ui"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
@@ -14,4 +14,4 @@ egui = "0.34"
 rfd = "0.17"
 fontdb = "0.23"
 ttf-parser = "0.25"
-resvg = { version = "0.45", default-features = false }
+resvg = { version = "0.47", default-features = false }

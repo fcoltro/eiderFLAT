@@ -262,12 +262,11 @@ impl AppState {
                 self.history.snapshot(&self.document);
                 let mut moved = Vec::new();
                 for id in ids {
-                    if id != self.origin_id {
-                        if let Some(e) = self.document.get_mut(id) {
+                    if id != self.origin_id
+                        && let Some(e) = self.document.get_mut(id) {
                             e.transform(&t);
                             moved.push(id);
                         }
-                    }
                 }
                 self.selection = moved;
                 self.tool = Tool::Select;
@@ -276,12 +275,11 @@ impl AppState {
                 self.history.snapshot(&self.document);
                 let mut new_ids = Vec::new();
                 for id in ids {
-                    if id != self.origin_id {
-                        if let Some(e) = self.document.get(id) {
+                    if id != self.origin_id
+                        && let Some(e) = self.document.get(id) {
                             let copy = e.transformed(&t);
                             new_ids.push(self.document.add_entity(copy));
                         }
-                    }
                 }
                 self.selection = new_ids;
                 self.tool = Tool::Select;
@@ -340,9 +338,9 @@ impl AppState {
             }
         }
 
-        if let Tool::Polygon { center: None, .. } = self.tool {
-            if let Ok(n) = trimmed.parse::<usize>() {
-                if n >= 3 {
+        if let Tool::Polygon { center: None, .. } = self.tool
+            && let Ok(n) = trimmed.parse::<usize>()
+                && n >= 3 {
                     self.tool = Tool::Polygon {
                         center: None,
                         sides: Some(n),
@@ -350,11 +348,9 @@ impl AppState {
                     self.command_log.push(trimmed.to_string());
                     return;
                 }
-            }
-        }
 
-        if let Ok(v) = trimmed.parse::<f64>() {
-            if v > 0.0 {
+        if let Ok(v) = trimmed.parse::<f64>()
+            && v > 0.0 {
                 match &self.tool {
                     Tool::Offset { source, .. } => {
                         self.tool = Tool::Offset {
@@ -383,10 +379,9 @@ impl AppState {
                     _ => {}
                 }
             }
-        }
 
-        if let Ok(dist) = trimmed.parse::<f64>() {
-            if let Some(ref_pt) = self.tool.reference_point() {
+        if let Ok(dist) = trimmed.parse::<f64>()
+            && let Some(ref_pt) = self.tool.reference_point() {
                 let (rx, ry) = ref_pt.to_f64();
                 let (cx, cy) = self.cursor_world;
                 let dx = cx - rx;
@@ -405,7 +400,6 @@ impl AppState {
                 self.command_log.push(trimmed.to_string());
                 return;
             }
-        }
 
         if let Some(coord) = parse_coordinate(trimmed) {
             let (rx, ry) = self
@@ -742,13 +736,11 @@ impl AppState {
     }
 
     pub fn set_nurbs_control(&mut self, id: EntityId, index: usize, p: Point2d) {
-        if let Some(e) = self.document.get_mut(id) {
-            if let EntityKind::Curve(Curve::Nurbs(nc)) = &mut e.kind {
-                if index < nc.control.len() {
+        if let Some(e) = self.document.get_mut(id)
+            && let EntityKind::Curve(Curve::Nurbs(nc)) = &mut e.kind
+                && index < nc.control.len() {
                     nc.control[index] = p;
                 }
-            }
-        }
     }
 
     pub fn adjust_nurbs_weight(&mut self, id: EntityId, index: usize, factor: f64) -> bool {
@@ -906,15 +898,14 @@ impl AppState {
 
         let mut bbox: Option<eiderflat_geometry::BoundingBox> = None;
         for &id in &self.selection {
-            if let Some(e) = self.document.get(id) {
-                if let Some(b) = e.bounding_box() {
+            if let Some(e) = self.document.get(id)
+                && let Some(b) = e.bounding_box() {
                     bbox = Some(if let Some(existing) = bbox {
                         existing.union(&b)
                     } else {
                         b
                     });
                 }
-            }
         }
 
         if let Some(bbox_start) = bbox {

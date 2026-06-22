@@ -3,10 +3,9 @@ use eiderflat_document::{Document, EntityId, EntityKind};
 
 pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
     for e in doc.editable_entities().rev() {
-        if let Some(bb) = e.bounding_box() {
-            if x < bb.min.x - tol || x > bb.max.x + tol
-                || y < bb.min.y - tol || y > bb.max.y + tol { continue; }
-        }
+        if let Some(bb) = e.bounding_box()
+            && (x < bb.min.x - tol || x > bb.max.x + tol
+                || y < bb.min.y - tol || y > bb.max.y + tol) { continue; }
         match &e.kind {
             EntityKind::Curve(c) => {
                 let pr = eiderflat_geometry::project_point_onto_curve(c, x, y);

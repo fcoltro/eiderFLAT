@@ -625,11 +625,10 @@ fn split_at_intersections(segs: Vec<(P, P)>) -> Vec<(P, P)> {
             if i == j {
                 continue;
             }
-            if let Some((t, _)) = seg_intersect(a, b, c, d) {
-                if t > 1e-9 && t < 1.0 - 1e-9 {
+            if let Some((t, _)) = seg_intersect(a, b, c, d)
+                && t > 1e-9 && t < 1.0 - 1e-9 {
                     ts.push(t);
                 }
-            }
         }
         ts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
         ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);

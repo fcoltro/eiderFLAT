@@ -88,9 +88,8 @@ pub fn find_snaps(
                 if on(SnapKind::Midpoint) {
                     for p in midpoints(c) { push_if_near(&mut out, SnapKind::Midpoint, p, e.id, cursor, tol); }
                 }
-                if on(SnapKind::Center) {
-                    if let Some(p) = center(c) { push_if_near(&mut out, SnapKind::Center, p, e.id, cursor, tol); }
-                }
+                if on(SnapKind::Center)
+                    && let Some(p) = center(c) { push_if_near(&mut out, SnapKind::Center, p, e.id, cursor, tol); }
                 if on(SnapKind::Quadrant) {
                     for p in quadrants(c) { push_if_near(&mut out, SnapKind::Quadrant, p, e.id, cursor, tol); }
                 }
@@ -98,18 +97,16 @@ pub fn find_snaps(
                     let pr = project_point_onto_curve(c, cursor.0, cursor.1);
                     push_if_near(&mut out, SnapKind::Nearest, pr.point, e.id, cursor, tol);
                 }
-                if on(SnapKind::Perpendicular) {
-                    if let Some(r) = reference {
-                        if let Some(p) = perpendicular_foot(c, r) {
+                if on(SnapKind::Perpendicular)
+                    && let Some(r) = reference
+                        && let Some(p) = perpendicular_foot(c, r) {
                             let pr = project_point_onto_curve(c, cursor.0, cursor.1);
                             if dist(pr.point, cursor) <= tol && dist(p, cursor) <= tol * 4.0 {
                                 out.push(SnapPoint { kind: SnapKind::Perpendicular, pos: p, entity: e.id });
                             }
                         }
-                    }
-                }
-                if on(SnapKind::Tangent) {
-                    if let Some(r) = reference {
+                if on(SnapKind::Tangent)
+                    && let Some(r) = reference {
                         let pr = project_point_onto_curve(c, cursor.0, cursor.1);
                         if dist(pr.point, cursor) <= tol {
                             for p in tangent_points(c, r) {
@@ -119,7 +116,6 @@ pub fn find_snaps(
                             }
                         }
                     }
-                }
             }
             EntityKind::Point(p)
                 if on(SnapKind::Node) => { push_if_near(&mut out, SnapKind::Node, p.to_f64(), e.id, cursor, tol); }

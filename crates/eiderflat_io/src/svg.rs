@@ -168,9 +168,8 @@ fn polycurve_path(pc: &PolyCurve, fx: &impl Fn(f64) -> f64, fy: &impl Fn(f64) ->
             }
             Curve::Rational(_) => {
                 let poly = crate::flatten_for_export(seg);
-                if let Some(p0) = poly.first() {
-                    if first { d.push_str(&format!("M {:.6} {:.6} ", fx(p0.x), fy(p0.y))); first = false; }
-                }
+                if let Some(p0) = poly.first()
+                    && first { d.push_str(&format!("M {:.6} {:.6} ", fx(p0.x), fy(p0.y))); first = false; }
                 for p in poly.iter().skip(1) {
                     d.push_str(&format!("L {:.6} {:.6} ", fx(p.x), fy(p.y)));
                 }
@@ -264,14 +263,13 @@ fn parse_attrs(text: &str) -> Vec<(String, String)> {
     while let Some(eq) = rest.find('=') {
         let key = rest[..eq].trim().trim_end_matches('/').trim().to_string();
         let after = &rest[eq + 1..];
-        if let Some(q1) = after.find('"') {
-            if let Some(q2) = after[q1 + 1..].find('"') {
+        if let Some(q1) = after.find('"')
+            && let Some(q2) = after[q1 + 1..].find('"') {
                 let val = after[q1 + 1..q1 + 1 + q2].to_string();
                 if !key.is_empty() { out.push((key, val)); }
                 rest = &after[q1 + 1 + q2 + 1..];
                 continue;
             }
-        }
         break;
     }
     out

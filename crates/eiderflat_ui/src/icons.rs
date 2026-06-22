@@ -90,8 +90,11 @@ fn recolour(src: &str, fg: Color32, accent: Color32) -> String {
         .replace(": #000", &format!(": {fg}"))
 }
 
+/// Cache key: (icon id, fg rgba, accent rgba, width px, height px).
+type SvgCacheKey = (u8, [u8; 4], [u8; 4], u16, u16);
+
 #[derive(Clone, Default)]
-struct SvgIconCache(HashMap<(u8, [u8; 4], [u8; 4], u16, u16), egui::TextureHandle>);
+struct SvgIconCache(HashMap<SvgCacheKey, egui::TextureHandle>);
 
 fn svg_texture(
     ctx: &egui::Context,

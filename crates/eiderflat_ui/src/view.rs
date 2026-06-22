@@ -137,15 +137,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         if ui_state.editing_text.is_none()
             && matches!(app.tool, Tool::Select)
             && response.double_clicked()
-        {
-            if let Some(p) = response.interact_pointer_pos() {
+            && let Some(p) = response.interact_pointer_pos() {
                 let (wx, wy) = app
                     .view
                     .screen_to_world((p.x - origin.x) as f64, (p.y - origin.y) as f64);
                 if let Some(id) =
                     eiderflat_cad::pick_at(&app.document, wx, wy, app.view.pixel_world_size() * 6.0)
-                {
-                    if let Some(EntityKind::Text { content, font, height, .. }) =
+                    && let Some(EntityKind::Text { content, font, height, .. }) =
                         app.document.get(id).map(|e| &e.kind)
                     {
                         ui_state.editing_text = Some(id);
@@ -155,9 +153,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         ui_state.text_edit_active = false;
                         app.selection = vec![id];
                     }
-                }
             }
-        }
         if ui_state.editing_text.is_some() {
             press_consumed = true;
         }
@@ -235,11 +231,10 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             if ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
                 ui_state.corner_input.pop();
             }
-            if let Ok(v) = ui_state.corner_input.parse::<f64>() {
-                if v > 0.0 {
+            if let Ok(v) = ui_state.corner_input.parse::<f64>()
+                && v > 0.0 {
                     app.set_corner_size(v);
                 }
-            }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
             if response.clicked() || enter {
                 app.apply_corner_action();
@@ -249,13 +244,12 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 app.cancel_corner_action();
                 ui_state.corner_input.clear();
             }
-        } else if response.clicked() {
-            if let Some(i) = hovered_dot {
+        } else if response.clicked()
+            && let Some(i) = hovered_dot {
                 let (g, _) = corner_dots[i];
                 app.begin_corner_action(g);
                 ui_state.corner_input.clear();
             }
-        }
         overlays::dyn_line_hud(ctx, app, ui_state, origin);
         overlays::dyn_circle_hud(ctx, app, ui_state, origin);
         overlays::dyn_rect_hud(ctx, app, ui_state, origin);
@@ -270,9 +264,8 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             && matches!(app.tool, Tool::Select)
             && app.selection.len() == 1
             && app.interaction.corner_action.is_none()
-        {
-            if let Some(e) = app.document.get(app.selection[0]) {
-                if let Some(bbox) = e.bounding_box() {
+            && let Some(e) = app.document.get(app.selection[0])
+                && let Some(bbox) = e.bounding_box() {
                     const HANDLE_RADIUS: f32 = 6.0;
                     let (minx, miny) = bbox.min.to_f64();
                     let (maxx, maxy) = bbox.max.to_f64();
@@ -307,13 +300,12 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                             handle_under_cursor = Some(crate::state::BboxHandle::Body);
                         }
                     }
-                    if response.drag_started_by(egui::PointerButton::Primary) {
-                        if let Some(handle) = handle_under_cursor {
+                    if response.drag_started_by(egui::PointerButton::Primary)
+                        && let Some(handle) = handle_under_cursor {
                             let (cx, cy) = app.cursor_world;
                             app.begin_bbox_drag(handle, (cx, cy));
                             bbox_drag_active = true;
                         }
-                    }
                     if response.dragged_by(egui::PointerButton::Primary)
                         && app.interaction.bbox_drag.is_some()
                     {
@@ -325,8 +317,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         app.end_bbox_drag();
                     }
                 }
-            }
-        }
         if bbox_drag_active {
             press_consumed = true;
         }
@@ -412,14 +402,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             press_consumed = true;
         }
         if !press_consumed && matches!(app.tool, Tool::Select) {
-            if response.drag_started_by(egui::PointerButton::Primary) {
-                if let Some(p) = response.interact_pointer_pos() {
+            if response.drag_started_by(egui::PointerButton::Primary)
+                && let Some(p) = response.interact_pointer_pos() {
                     ctx.data_mut(|d| {
                         d.insert_temp(egui::Id::new("marquee_start"), p);
                         d.insert_temp(egui::Id::new("marquee_on"), true);
                     });
                 }
-            }
             if response.drag_stopped()
                 && ctx.data(|d| {
                     d.get_temp::<bool>(egui::Id::new("marquee_on"))
@@ -431,8 +420,8 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 let end = response
                     .interact_pointer_pos()
                     .or_else(|| response.hover_pos());
-                if let (Some(s), Some(e)) = (start, end) {
-                    if (e - s).length() > 3.0 {
+                if let (Some(s), Some(e)) = (start, end)
+                    && (e - s).length() > 3.0 {
                         let (x0, y0) = app
                             .view
                             .screen_to_world((s.x - origin.x) as f64, (s.y - origin.y) as f64);
@@ -456,7 +445,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                             })
                             .collect();
                     }
-                }
                 ctx.data_mut(|d| d.insert_temp(egui::Id::new("marquee_on"), false));
             }
         }
@@ -467,14 +455,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             } else {
                 response.contains_pointer() && ui.input(|i| i.pointer.primary_pressed())
             };
-        if place_point {
-            if let Some(p) = response
+        if place_point
+            && let Some(p) = response
                 .interact_pointer_pos()
                 .or_else(|| response.hover_pos())
             {
                 app.canvas_click((p.x - origin.x) as f64, (p.y - origin.y) as f64);
             }
-        }
         if !palette_open
             && ui_state.editing_text.is_none()
             && ui.input(|i| i.key_pressed(egui::Key::Escape))
@@ -529,11 +516,10 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             None
         };
         if matches!(app.tool, Tool::Select) {
-            if response.secondary_clicked() && app.selection.is_empty() {
-                if let Some(h) = hovered_id {
+            if response.secondary_clicked() && app.selection.is_empty()
+                && let Some(h) = hovered_id {
                     app.selection = vec![h];
                 }
-            }
             response.context_menu(|ui| {
                 if !app.selection.is_empty() {
                     if ui.button("Delete").clicked() {
@@ -607,12 +593,11 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     }
                     ui.separator();
                 }
-                if let Some(last) = app.last_command.clone() {
-                    if ui.button(format!("Repeat: {last}")).clicked() {
+                if let Some(last) = app.last_command.clone()
+                    && ui.button(format!("Repeat: {last}")).clicked() {
                         app.repeat_last_command();
                         ui.close();
                     }
-                }
                 if ui.button("Select All").clicked() {
                     app.execute(Command::SelectAll);
                     ui.close();
@@ -728,9 +713,9 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 app.zoom_target = None;
             }
         }
-        if !has_own_grips && matches!(app.tool, Tool::Select) && app.selection.len() == 1 {
-            if let Some(e) = app.document.get(app.selection[0]) {
-                if let Some(bbox) = e.bounding_box() {
+        if !has_own_grips && matches!(app.tool, Tool::Select) && app.selection.len() == 1
+            && let Some(e) = app.document.get(app.selection[0])
+                && let Some(bbox) = e.bounding_box() {
                     let bbox_stroke = Stroke::new(1.0, Color32::from_rgb(0, 200, 255));
                     let (minx, miny) = bbox.min.to_f64();
                     let (maxx, maxy) = bbox.max.to_f64();
@@ -756,8 +741,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         painter.rect_filled(handle_rect, 0.0, Color32::from_rgb(0, 200, 255));
                     }
                 }
-            }
-        }
         let to_screen = |wx: f64, wy: f64| {
             let (sx, sy) = app.view.world_to_screen(wx, wy);
             pos2(origin.x + sx as f32, origin.y + sy as f32)
@@ -833,7 +816,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     painter.circle_filled(p, 11.0, crate::theme::CANVAS_BG);
                     crate::icons::paint_icon(
                         &painter,
-                        &ctx,
+                        ctx,
                         crate::icons::Icon::Rotate,
                         egui::Rect::from_center_size(p, vec2(18.0, 18.0)),
                         col,
@@ -986,14 +969,14 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         );
                         crate::icons::paint_icon(
                             &painter,
-                            &ctx,
+                            ctx,
                             crate::icons::Icon::Undo,
                             left,
                             Color32::WHITE,
                         );
                         crate::icons::paint_icon(
                             &painter,
-                            &ctx,
+                            ctx,
                             crate::icons::Icon::Redo,
                             right,
                             Color32::WHITE,
@@ -1007,8 +990,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 d.get_temp::<bool>(egui::Id::new("marquee_on"))
                     .unwrap_or(false)
             })
-        {
-            if let (Some(start), Some(cur)) = (
+            && let (Some(start), Some(cur)) = (
                 ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("marquee_start"))),
                 response
                     .hover_pos()
@@ -1048,7 +1030,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     );
                 }
             }
-        }
         if let Some(((rx, ry), angle_rad)) = app.interaction.active_guide {
             let view_diag =
                 (app.view.width * app.view.width + app.view.height * app.view.height).sqrt();
