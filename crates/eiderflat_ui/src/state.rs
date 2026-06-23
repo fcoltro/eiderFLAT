@@ -1,5 +1,6 @@
 use eiderflat_cad::{
-    Grip, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps, grips_for, pick_at,
+    Grip, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps_excluding, grips_for,
+    pick_at,
 };
 use eiderflat_document::{Document, EntityId, EntityKind, Layer};
 use eiderflat_geometry::{Curve, Point2d};
@@ -141,10 +142,12 @@ impl AppState {
             s.tolerance = self.view.pixel_world_size() * 12.0;
             let ref_pt = self.tool.reference_point().map(|p| p.to_f64());
             match dragged_entity {
-                // Skip the entity being edited so a grip never snaps to itself.
-                Some(ex) => find_snaps(&self.document, (wx, wy), &s, ref_pt)
+                // Skip the entity being edited (all snap kinds) so a grip never
+                // snaps to itself, including the moving edge's "apparent
+                // intersections" with everything it sweeps across.
+                Some(ex) => find_snaps_excluding(&self.document, (wx, wy), &s, ref_pt, Some(ex))
                     .into_iter()
-                    .find(|sp| sp.entity != ex),
+                    .next(),
                 None => best_snap(&self.document, (wx, wy), &s, ref_pt),
             }
         } else {

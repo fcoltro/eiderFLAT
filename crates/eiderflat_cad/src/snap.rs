@@ -67,11 +67,28 @@ pub fn find_snaps(
     settings: &SnapSettings,
     reference: Option<(f64, f64)>,
 ) -> Vec<SnapPoint> {
+    find_snaps_excluding(doc, cursor, settings, reference, None)
+}
+
+/// Like [`find_snaps`], but skips `exclude` entirely (all snap kinds, including
+/// intersections). Used while dragging a grip so the entity being edited never
+/// snaps to itself — in particular so its moving edge stops producing confusing
+/// "apparent intersections" with everything it sweeps across.
+pub fn find_snaps_excluding(
+    doc: &Document,
+    cursor: (f64, f64),
+    settings: &SnapSettings,
+    reference: Option<(f64, f64)>,
+    exclude: Option<EntityId>,
+) -> Vec<SnapPoint> {
     let mut out = Vec::new();
     let tol = settings.tolerance;
     let on = |k: SnapKind| settings.enabled.contains(&k);
 
-    let entities: Vec<_> = doc.editable_entities().collect();
+    let entities: Vec<_> = doc
+        .editable_entities()
+        .filter(|e| Some(e.id) != exclude)
+        .collect();
 
     for e in &entities {
         match &e.kind {

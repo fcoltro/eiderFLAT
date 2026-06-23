@@ -443,10 +443,7 @@ pub(super) fn resolve_color(app: &AppState, e: &eiderflat_document::Entity) -> (
     }
 }
 
-pub(super) fn refresh_hatch_cache(
-    app: &AppState,
-    cache: &mut std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>)>,
-) {
+pub(super) fn refresh_hatch_cache(app: &AppState, cache: &mut super::HatchCache) {
     use std::collections::HashSet;
     let target = (app.view.pixel_world_size() * 0.4).max(1e-9);
     let bucket = target.log2().floor();
@@ -458,10 +455,14 @@ pub(super) fn refresh_hatch_cache(
         } = &e.kind
         {
             live.insert(e.id);
+            // The bucket is part of the signature, so this recomputes (and only
+            // recomputes) when the geometry or the zoom level changes — keeping
+            // the fill and outline crisp as you zoom in.
             let sig = hatch_signature(boundary, holes, bucket as i64);
-            if cache.get(&e.id).map(|(s, _)| *s) != Some(sig) {
+            if cache.get(&e.id).map(|(s, _, _)| *s) != Some(sig) {
                 let tris = eiderflat_cad::triangulate_hatch_with_tol(boundary, holes, tol);
-                cache.insert(e.id, (sig, tris));
+                let loops = eiderflat_cad::hatch_outline_loops(boundary, holes, tol);
+                cache.insert(e.id, (sig, tris, loops));
             }
         }
     }
@@ -493,6 +494,7 @@ fn hatch_signature(boundary: &[Curve], holes: &[Vec<Curve>], tol_bucket: i64) ->
     h.finish()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_entity(
     painter: &egui::Painter,
     app: &AppState,
@@ -500,6 +502,7 @@ pub(super) fn draw_entity(
     origin: egui::Pos2,
     stroke: Stroke,
     hatch_tris: Option<&[[Point2d; 3]]>,
+    hatch_loops: Option<&[Vec<Point2d>]>,
 ) {
     let to_screen = |wx: f64, wy: f64| {
         let (sx, sy) = app.view.world_to_screen(wx, wy);
@@ -642,12 +645,29 @@ pub(super) fn draw_entity(
                     }
                 }
             }
-            for seg in boundary {
-                draw_curve(painter, seg, &to_screen, stroke);
-            }
-            for hole in holes {
-                for seg in hole {
-                    draw_curve(painter, seg, &to_screen, stroke);
+            // Stroke the outline from the cached, pre-flattened loops when we
+            // have them (avoids re-flattening every boundary curve each frame —
+            // critical for heavy boundaries such as outlined text). Fall back to
+            // adaptive per-curve drawing only when no cache is available.
+            match hatch_loops {
+                Some(loops) => {
+                    for ring in loops {
+                        if ring.len() >= 2 {
+                            let pts: Vec<egui::Pos2> =
+                                ring.iter().map(|p| to_screen(p.x, p.y)).collect();
+                            painter.add(egui::Shape::closed_line(pts, stroke));
+                        }
+                    }
+                }
+                None => {
+                    for seg in boundary {
+                        draw_curve(painter, seg, &to_screen, stroke);
+                    }
+                    for hole in holes {
+                        for seg in hole {
+                            draw_curve(painter, seg, &to_screen, stroke);
+                        }
+                    }
                 }
             }
         }

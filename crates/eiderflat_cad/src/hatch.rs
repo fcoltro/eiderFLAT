@@ -234,6 +234,32 @@ pub fn triangulate_with_tol(
     ear_clip(&merged)
 }
 
+/// Flattened closed boundary loops (outer ring first, then each hole) at the
+/// given tolerance. Lets the renderer stroke a hatch outline from a cached
+/// polyline instead of re-flattening every boundary curve every frame, while
+/// still refining as you zoom in (smaller `tol`).
+pub fn outline_loops(boundary: &[Curve], holes: &[Vec<Curve>], tol: f64) -> Vec<Vec<Point2d>> {
+    let floor = (region_diag(boundary) * 2e-5).max(1e-7);
+    let tol = tol.max(floor);
+    let to_pts = |ring: Vec<P>| -> Vec<Point2d> {
+        ring.into_iter()
+            .map(|(x, y)| Point2d::from_f64(x, y))
+            .collect()
+    };
+    let mut loops = Vec::new();
+    let outer = loop_polygon(boundary, tol);
+    if outer.len() >= 2 {
+        loops.push(to_pts(outer));
+    }
+    for h in holes {
+        let ring = loop_polygon(h, tol);
+        if ring.len() >= 2 {
+            loops.push(to_pts(ring));
+        }
+    }
+    loops
+}
+
 fn region_diag(boundary: &[Curve]) -> f64 {
     let mut min = (f64::MAX, f64::MAX);
     let mut max = (f64::MIN, f64::MIN);

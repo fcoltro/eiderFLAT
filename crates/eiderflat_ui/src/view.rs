@@ -23,6 +23,11 @@ use render::{
 };
 use tessellate::draw_curve;
 
+/// Per-hatch render cache: (geometry+zoom signature, fill triangles, flattened
+/// outline loops). See [`render::refresh_hatch_cache`].
+pub type HatchCache =
+    std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>, Vec<Vec<Point2d>>)>;
+
 #[derive(Default)]
 pub struct UiState {
     pub command_input: String,
@@ -55,7 +60,7 @@ pub struct UiState {
     pub palette_nav: bool,
     pub last_title: String,
     pub about_open: bool,
-    pub hatch_cache: std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>)>,
+    pub hatch_cache: HatchCache,
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
@@ -802,10 +807,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             } else {
                 1.5
             };
-            let hatch_tris = if matches!(e.kind, EntityKind::Hatch { .. }) {
-                ui_state.hatch_cache.get(&e.id).map(|(_, t)| t.as_slice())
+            let (hatch_tris, hatch_loops) = if matches!(e.kind, EntityKind::Hatch { .. }) {
+                match ui_state.hatch_cache.get(&e.id) {
+                    Some((_, t, l)) => (Some(t.as_slice()), Some(l.as_slice())),
+                    None => (None, None),
+                }
             } else {
-                None
+                (None, None)
             };
             draw_entity(
                 &painter,
@@ -814,6 +822,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 origin,
                 Stroke::new(width, color),
                 hatch_tris,
+                hatch_loops,
             );
         }
         if matches!(app.tool, Tool::Select) && app.interaction.corner_action.is_none() {

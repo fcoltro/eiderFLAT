@@ -537,7 +537,7 @@ pub(super) fn command_bar(
         canvas_rect.center().x - width / 2.0,
         screen.top() + screen.height() * 0.13,
     );
-    egui::Area::new(egui::Id::new("command_palette"))
+    let card = egui::Area::new(egui::Id::new("command_palette"))
         .order(egui::Order::Tooltip)
         .fixed_pos(pos)
         .show(ctx, |ui| {
@@ -679,6 +679,12 @@ pub(super) fn command_bar(
                         });
                 });
         });
+    // Keep the card above the full-screen backdrop. Both live on the Tooltip
+    // layer, and clicking the backdrop to dismiss it moves the backdrop to the
+    // front; without this, reopening the palette would leave the dim backdrop
+    // painted on top of (and swallowing clicks to) the card — it looked dark and
+    // unresponsive. Re-topping the card every frame prevents that.
+    ctx.move_to_top(card.response.layer_id);
 
     if let Some(i) = run_idx {
         if i < visible.len() {

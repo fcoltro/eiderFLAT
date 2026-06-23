@@ -1,5 +1,4 @@
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2};
-use std::collections::HashMap;
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Select,
@@ -38,128 +37,16 @@ pub enum Icon {
     Delete,
 }
 
-impl Icon {
-    fn svg_src(self) -> Option<&'static str> {
-        Some(match self {
-            Icon::Select => include_str!("../assets/icons/tool_selection.svg"),
-            Icon::Line => include_str!("../assets/icons/tool_line.svg"),
-            Icon::Circle => include_str!("../assets/icons/tool_circle.svg"),
-            Icon::Ellipse => include_str!("../assets/icons/tool_ellipse.svg"),
-            Icon::Arc => include_str!("../assets/icons/tool_arc.svg"),
-            Icon::Rectangle => include_str!("../assets/icons/tool_rectangle.svg"),
-            Icon::Polygon => include_str!("../assets/icons/tool_polygon.svg"),
-            Icon::Spline => include_str!("../assets/icons/tool_spline.svg"),
-            Icon::Polyline => include_str!("../assets/icons/tool_polyline.svg"),
-            Icon::Text => include_str!("../assets/icons/tool_text.svg"),
-            Icon::Move => include_str!("../assets/icons/tool_move.svg"),
-            Icon::Copy => include_str!("../assets/icons/tool_copy.svg"),
-            Icon::Rotate => include_str!("../assets/icons/tool_rotate.svg"),
-            Icon::Scale => include_str!("../assets/icons/tool_scale.svg"),
-            Icon::Mirror => include_str!("../assets/icons/tool_mirror.svg"),
-            Icon::Offset => include_str!("../assets/icons/tool_offset.svg"),
-            Icon::Trim => include_str!("../assets/icons/tool_trim.svg"),
-            Icon::Extend => include_str!("../assets/icons/tool_extend.svg"),
-            Icon::Fillet => include_str!("../assets/icons/tool_fillet.svg"),
-            Icon::Chamfer => include_str!("../assets/icons/tool_chamfer.svg"),
-            Icon::Stretch => include_str!("../assets/icons/tool_stretch.svg"),
-            Icon::Explode => include_str!("../assets/icons/tool_explode.svg"),
-            Icon::Join => include_str!("../assets/icons/tool_join.svg"),
-            Icon::Hatch => include_str!("../assets/icons/tool_hatch.svg"),
-            Icon::Undo => include_str!("../assets/icons/ui_undo.svg"),
-            Icon::Redo => include_str!("../assets/icons/ui_redo.svg"),
-            Icon::Eye => include_str!("../assets/icons/ui_visible.svg"),
-            Icon::EyeOff => include_str!("../assets/icons/ui_hide.svg"),
-            Icon::ZoomIn => include_str!("../assets/icons/ui_zoom_in.svg"),
-            Icon::ZoomOut => include_str!("../assets/icons/ui_zoom_out.svg"),
-            Icon::ZoomFit => include_str!("../assets/icons/ui_zoom_extents.svg"),
-            Icon::Pan => include_str!("../assets/icons/ui_pan.svg"),
-            Icon::AddLayer => include_str!("../assets/icons/ui_add_layer.svg"),
-            Icon::Delete => include_str!("../assets/icons/ui_delete.svg"),
-        })
-    }
-}
-
-fn hex(c: Color32) -> String {
-    format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
-}
-
-fn recolour(src: &str, fg: Color32, accent: Color32) -> String {
-    let (fg, accent) = (hex(fg), hex(accent));
-    src.replace(": #ec2024", &format!(": {accent}"))
-        .replace(": red", &format!(": {accent}"))
-        .replace(": #000", &format!(": {fg}"))
-}
-
-/// Cache key: (icon id, fg rgba, accent rgba, width px, height px).
-type SvgCacheKey = (u8, [u8; 4], [u8; 4], u16, u16);
-
-#[derive(Clone, Default)]
-struct SvgIconCache(HashMap<SvgCacheKey, egui::TextureHandle>);
-
-fn svg_texture(
-    ctx: &egui::Context,
-    icon: Icon,
-    fg: Color32,
-    accent: Color32,
-    w: u32,
-    h: u32,
-) -> Option<egui::TextureHandle> {
-    let key = (
-        icon as u8,
-        fg.to_array(),
-        accent.to_array(),
-        w as u16,
-        h as u16,
-    );
-    let id = egui::Id::new("eiderflat_svg_icon_cache");
-    if let Some(tex) = ctx.data(|d| {
-        d.get_temp::<SvgIconCache>(id)
-            .and_then(|c| c.0.get(&key).cloned())
-    }) {
-        return Some(tex);
-    }
-
-    let svg = recolour(icon.svg_src()?, fg, accent);
-    let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).ok()?;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
-    let scale = (w.min(h) as f32) / 32.0;
-    let tx = (w as f32 - 32.0 * scale) * 0.5;
-    let ty = (h as f32 - 32.0 * scale) * 0.5;
-    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, ty);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-    let image = egui::ColorImage::from_rgba_premultiplied([w as usize, h as usize], pixmap.data());
-    let tex = ctx.load_texture(
-        format!("svg_icon_{}", icon as u8),
-        image,
-        egui::TextureOptions::LINEAR,
-    );
-    ctx.data_mut(|d| {
-        d.get_temp_mut_or_insert_with::<SvgIconCache>(id, SvgIconCache::default)
-            .0
-            .insert(key, tex.clone());
-    });
-    Some(tex)
-}
-
 pub fn paint_icon(
     painter: &egui::Painter,
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
     icon: Icon,
     rect: Rect,
     fg: Color32,
 ) {
-    let ppp = ctx.pixels_per_point();
-    let w = (rect.width() * ppp).round().max(1.0) as u32;
-    let h = (rect.height() * ppp).round().max(1.0) as u32;
-    if let Some(tex) = svg_texture(ctx, icon, fg, crate::theme::SNAP, w, h) {
-        painter.image(
-            tex.id(),
-            rect,
-            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-            Color32::WHITE,
-        );
-    }
+    // Native vector glyph (same renderer as the icon buttons) so palette rows
+    // and the inspector header match the toolbars exactly.
+    icon.draw(painter, rect, fg);
 }
 
 fn rasterize_svg(svg: &str, w: u32, h: u32) -> Option<resvg::tiny_skia::Pixmap> {
@@ -272,32 +159,17 @@ pub fn icon_button_sized(
         Color32::from_rgb(214, 224, 240)
     };
 
-    let accent = if enabled { crate::theme::ACCENT } else { fg };
     // The glyph is a fixed pixel size regardless of the button box, so every
     // icon across the UI (toolbars, layer rows, the contextual popup, undo/redo,
     // …) renders at the same visual size. Smaller buttons keep a little padding.
+    // Icons are native vector strokes (not rasterized SVG): crisp at any DPI and
+    // one consistent on-screen size.
     let glyph = GLYPH_PX.min(size - 6.0).max(8.0);
     let area = snap_rect(
         Rect::from_center_size(rect.center(), Vec2::splat(glyph)),
         ppp,
     );
-    let drawn_svg = if icon.svg_src().is_some() {
-        let w = (area.width() * ppp).round().max(1.0) as u32;
-        let h = (area.height() * ppp).round().max(1.0) as u32;
-        svg_texture(ui.ctx(), icon, fg, accent, w, h).inspect(|tex| {
-            painter.image(
-                tex.id(),
-                area,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        })
-    } else {
-        None
-    };
-    if drawn_svg.is_none() {
-        icon.draw(&painter, area, fg);
-    }
+    icon.draw(&painter, area, fg);
 
     if hovered {
         response = response.on_hover_text(tooltip);
@@ -736,7 +608,60 @@ impl Icon {
                 );
             }
 
-            Icon::Pan | Icon::AddLayer | Icon::Delete => {}
+            Icon::Delete => {
+                // Trash can: lid, handle, tapering body, two inner slots.
+                painter.line_segment([p(r, 0.12, 0.24), p(r, 0.88, 0.24)], s); // lid
+                painter.line_segment([p(r, 0.40, 0.12), p(r, 0.60, 0.12)], s); // handle top
+                painter.line_segment([p(r, 0.40, 0.12), p(r, 0.40, 0.24)], s);
+                painter.line_segment([p(r, 0.60, 0.12), p(r, 0.60, 0.24)], s);
+                painter.add(egui::Shape::line(
+                    vec![
+                        p(r, 0.20, 0.24),
+                        p(r, 0.26, 0.90),
+                        p(r, 0.74, 0.90),
+                        p(r, 0.80, 0.24),
+                    ],
+                    s,
+                ));
+                painter.line_segment([p(r, 0.42, 0.36), p(r, 0.44, 0.80)], thin);
+                painter.line_segment([p(r, 0.58, 0.36), p(r, 0.56, 0.80)], thin);
+            }
+            Icon::AddLayer => {
+                // A sheet (diamond, seen in perspective) plus a "+" to add one.
+                painter.add(egui::Shape::closed_line(
+                    vec![
+                        p(r, 0.40, 0.08),
+                        p(r, 0.74, 0.28),
+                        p(r, 0.40, 0.48),
+                        p(r, 0.06, 0.28),
+                    ],
+                    s,
+                ));
+                // Front edge of a second sheet underneath.
+                painter.add(egui::Shape::line(
+                    vec![p(r, 0.06, 0.40), p(r, 0.40, 0.60), p(r, 0.74, 0.40)],
+                    dim,
+                ));
+                // Plus badge (add).
+                painter.line_segment([p(r, 0.62, 0.74), p(r, 0.90, 0.74)], s);
+                painter.line_segment([p(r, 0.76, 0.60), p(r, 0.76, 0.88)], s);
+            }
+            Icon::Pan => {
+                // Open hand: palm with three fingers and a thumb.
+                painter.add(egui::Shape::line(
+                    vec![
+                        p(r, 0.28, 0.52),
+                        p(r, 0.28, 0.82),
+                        p(r, 0.70, 0.92),
+                        p(r, 0.78, 0.56),
+                    ],
+                    s,
+                ));
+                for fx in [0.36f32, 0.50, 0.64] {
+                    painter.line_segment([p(r, fx, 0.50), p(r, fx, 0.22)], s);
+                }
+                painter.line_segment([p(r, 0.28, 0.56), p(r, 0.16, 0.46)], s); // thumb
+            }
         }
     }
 }

@@ -946,7 +946,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                                     egui::Align2::LEFT_CENTER,
                                     text,
                                     egui::FontId::monospace(12.5),
-                                    crate::theme::TEXT,
+                                    crate::theme::ACCENT_BRIGHT,
                                 );
                             };
                             ui.label(
@@ -998,7 +998,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         ui.label(
                             egui::RichText::new(format!("{:>3.0}%", app.view.zoom_percent()))
                                 .monospace()
-                                .color(crate::theme::TEXT),
+                                .color(crate::theme::ACCENT_BRIGHT),
                         );
                         if round_btn(ui, "+", "Zoom in") {
                             app.view.zoom_at(wx, wy, 1.25);
