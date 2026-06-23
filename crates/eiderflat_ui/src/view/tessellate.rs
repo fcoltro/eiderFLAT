@@ -1,6 +1,7 @@
 use egui::Stroke;
 use eiderflat_geometry::{Curve, CurveSegment};
 const TESS_TOL_PX: f32 = 0.3;
+const TESS_TOL_PX_SQ: f32 = TESS_TOL_PX * TESS_TOL_PX;
 const TESS_MAX_DEPTH: u32 = 18;
 const TESS_MAX_POINTS: usize = 20_000;
 
@@ -33,46 +34,57 @@ pub(super) fn flatten_curve(
     };
     let mut pts: Vec<egui::Pos2> = Vec::with_capacity(64);
     const SPANS: usize = 4;
-    pts.push(eval(t0));
+    // Evaluate each span endpoint exactly once and thread it through the
+    // recursion, so a curve point is never re-evaluated at a shared parameter.
+    let mut a = t0;
+    let mut pa = eval(t0);
+    pts.push(pa);
     for i in 0..SPANS {
-        let a = t0 + (t1 - t0) * i as f64 / SPANS as f64;
         let b = t0 + (t1 - t0) * (i + 1) as f64 / SPANS as f64;
-        tessellate(&eval, a, b, 0, &mut pts);
+        let pb = eval(b);
+        tessellate(&eval, a, pa, b, pb, 0, &mut pts);
+        a = b;
+        pa = pb;
     }
     pts
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tessellate(
     eval: &impl Fn(f64) -> egui::Pos2,
     t0: f64,
+    p0: egui::Pos2,
     t1: f64,
+    p1: egui::Pos2,
     depth: u32,
     out: &mut Vec<egui::Pos2>,
 ) {
     if out.len() >= TESS_MAX_POINTS {
         return;
     }
-    let p0 = *out.last().unwrap();
-    let p1 = eval(t1);
     let tm = 0.5 * (t0 + t1);
     let pm = eval(tm);
-    if depth >= TESS_MAX_DEPTH || point_seg_dist(pm, p0, p1) <= TESS_TOL_PX {
+    if depth >= TESS_MAX_DEPTH || point_seg_dist_sq(pm, p0, p1) <= TESS_TOL_PX_SQ {
         out.push(p1);
     } else {
-        tessellate(eval, t0, tm, depth + 1, out);
-        tessellate(eval, tm, t1, depth + 1, out);
+        tessellate(eval, t0, p0, tm, pm, depth + 1, out);
+        tessellate(eval, tm, pm, t1, p1, depth + 1, out);
     }
 }
 
-pub(super) fn point_seg_dist(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+/// Squared distance from `p` to segment `a`–`b`. Avoids a `sqrt` on hot paths
+/// (tessellation tolerance tests) where only a comparison against a squared
+/// threshold is needed; take `.sqrt()` of the result when an actual distance
+/// is wanted.
+pub(super) fn point_seg_dist_sq(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     let abx = b.x - a.x;
     let aby = b.y - a.y;
     let len2 = abx * abx + aby * aby;
     if len2 < 1e-12 {
-        return ((p.x - a.x).powi(2) + (p.y - a.y).powi(2)).sqrt();
+        return (p.x - a.x).powi(2) + (p.y - a.y).powi(2);
     }
     let t = (((p.x - a.x) * abx + (p.y - a.y) * aby) / len2).clamp(0.0, 1.0);
     let cx = a.x + t * abx;
     let cy = a.y + t * aby;
-    ((p.x - cx).powi(2) + (p.y - cy).powi(2)).sqrt()
+    (p.x - cx).powi(2) + (p.y - cy).powi(2)
 }

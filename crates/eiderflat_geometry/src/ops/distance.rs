@@ -125,14 +125,27 @@ fn golden_section_projection_fn(
 
     let mut a = (best_t - dt).max(t0);
     let mut b = (best_t + dt).min(t1);
+    // Golden-section search that carries the two interior probes across
+    // iterations, so each step needs only one new curve evaluation (the
+    // expensive part for splines) instead of two.
     let phi = (5f64.sqrt() - 1.0) / 2.0;
+    let mut c = b - phi * (b - a);
+    let mut d = a + phi * (b - a);
+    let mut fc = dist_sq(c);
+    let mut fd = dist_sq(d);
     for _ in 0..50 {
-        let c = b - phi * (b - a);
-        let d = a + phi * (b - a);
-        if dist_sq(c) < dist_sq(d) {
+        if fc < fd {
             b = d;
+            d = c;
+            fd = fc;
+            c = b - phi * (b - a);
+            fc = dist_sq(c);
         } else {
             a = c;
+            c = d;
+            fc = fd;
+            d = a + phi * (b - a);
+            fd = dist_sq(d);
         }
         if (b - a).abs() < 1e-12 {
             break;

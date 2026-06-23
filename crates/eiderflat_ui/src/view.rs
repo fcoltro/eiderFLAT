@@ -1423,7 +1423,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
 }
 #[cfg(test)]
 mod tess_tests {
-    use super::tessellate::{flatten_curve, point_seg_dist};
+    use super::tessellate::{flatten_curve, point_seg_dist_sq};
     use crate::view_transform::ViewTransform;
     use eiderflat_geometry::{CircularArc, Curve, CurveSegment, Point2d};
 
@@ -1461,7 +1461,7 @@ mod tess_tests {
             let p = to_screen(x, y);
             let mut best = f32::INFINITY;
             for w in poly.windows(2) {
-                best = best.min(point_seg_dist(p, w[0], w[1]));
+                best = best.min(point_seg_dist_sq(p, w[0], w[1]).sqrt());
             }
             worst = worst.max(best);
         }
