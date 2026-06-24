@@ -71,6 +71,17 @@ pub fn system_families() -> Vec<String> {
     faces().iter().map(|f| f.label.clone()).collect()
 }
 
+/// The family name a `None` (default) text font actually resolves to when
+/// outlined — "Arial" if present, otherwise the first available family.
+/// Mirrors the fallback in `outline_text`.
+pub fn default_family_label() -> Option<String> {
+    if faces().iter().any(|f| f.label == "Arial") {
+        Some("Arial".to_string())
+    } else {
+        faces().first().map(|f| f.label.clone())
+    }
+}
+
 pub fn warm() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {

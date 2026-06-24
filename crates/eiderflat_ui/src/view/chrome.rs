@@ -612,13 +612,17 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
 
 pub(super) fn font_combo(ui: &mut egui::Ui, salt: &str, font: &mut Option<String>) -> bool {
     let families = crate::fonts::system_families();
-    let label = font.clone().unwrap_or_else(|| "(default)".to_string());
+    let default_label = match crate::fonts::default_family_label() {
+        Some(name) => format!("Default ({name})"),
+        None => "Default".to_string(),
+    };
+    let label = font.clone().unwrap_or_else(|| default_label.clone());
     let mut changed = false;
     egui::ComboBox::from_id_salt(salt)
         .selected_text(label)
         .width(150.0)
         .show_ui(ui, |ui| {
-            if ui.selectable_label(font.is_none(), "(default)").clicked() && font.is_some() {
+            if ui.selectable_label(font.is_none(), &default_label).clicked() && font.is_some() {
                 *font = None;
                 changed = true;
             }
