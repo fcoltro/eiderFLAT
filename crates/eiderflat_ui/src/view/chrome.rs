@@ -1285,9 +1285,10 @@ fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
     let w = galley.size().x + 18.0;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
     let (fill, stroke, fg) = if *on {
+        // Match the active SNAP master: borderless ACCENT_DIM fill, bright text.
         (
             crate::theme::ACCENT_DIM,
-            egui::Stroke::new(1.0, crate::theme::ACCENT),
+            egui::Stroke::NONE,
             crate::theme::ACCENT_BRIGHT,
         )
     } else if resp.hovered() {
