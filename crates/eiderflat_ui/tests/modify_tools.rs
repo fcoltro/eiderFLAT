@@ -160,8 +160,6 @@ fn fillet_triangle_caps_radius_across_shared_edges() {
 
 #[test]
 fn fillet_triangle_arcs_connect_to_trimmed_lines() {
-    use eiderflat_ui::state::CornerKind;
-
     // A scalene triangle with an acute corner. The fillet at an acute corner has
     // a long tangent reach, so each side must be trimmed at the end that meets
     // the corner — not the end nearer the tangent point. Otherwise an arc ends
@@ -214,6 +212,46 @@ fn fillet_triangle_arcs_connect_to_trimmed_lines() {
             );
         }
     }
+}
+
+#[test]
+fn grip_drag_tracks_the_lines_original_axis() {
+    let mut a = app();
+    a.track_on = true;
+    // A line along the x-axis, plus an unrelated line whose axis must NOT show.
+    let l1 = a.add_entity(line(0, 0, 10, 0));
+    a.add_entity(line(3, 5, 3, 12));
+
+    // Grab the (10,0) endpoint grip and start dragging it.
+    a.selection = vec![l1];
+    let grip = a
+        .selection_grips()
+        .into_iter()
+        .find(|(id, g)| *id == l1 && (g.world.to_f64().0 - 10.0).abs() < 1e-6)
+        .map(|(_, g)| g)
+        .expect("line should expose an endpoint grip at (10,0)");
+    a.begin_grip_drag(l1, grip);
+
+    // Move the cursor a hair off the original axis, past the end. It should lock
+    // back onto y=0 (colinear with where the line was), with one Extension guide
+    // and nothing from the other line.
+    let tol = a.view.pixel_world_size() * 10.0;
+    let (sx, sy) = a.view.world_to_screen(14.0, tol * 0.5);
+    a.pointer_moved(sx, sy);
+
+    let labels: Vec<&str> = a
+        .interaction
+        .active_guides
+        .iter()
+        .map(|g| g.kind.label())
+        .collect();
+    assert_eq!(labels, vec!["Extension"], "only the edited line's axis");
+    assert!(
+        a.cursor_world.1.abs() < 1e-6,
+        "cursor should snap back onto y=0, got {:?}",
+        a.cursor_world
+    );
+    assert!((a.cursor_world.0 - 14.0).abs() < 1e-6);
 }
 
 #[test]

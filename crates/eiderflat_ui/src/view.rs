@@ -17,9 +17,9 @@ use chrome::{
 };
 use palette::command_bar;
 use render::{
-    draw_corner_preview, draw_dashed_line, draw_entity, draw_grid, draw_prompt_chip,
+    HATCH_SELECT, draw_corner_preview, draw_dashed_line, draw_entity, draw_grid, draw_prompt_chip,
     draw_scale_bar, draw_transform_ghost, draw_trim_extend_preview, layer_visible,
-    refresh_hatch_cache, resolve_color, tool_prompt,
+    refresh_hatch_cache, resolve_color, resolve_line_weight_px, tool_prompt,
 };
 use tessellate::draw_curve;
 
@@ -667,16 +667,25 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             ctx.data_mut(|d| d.insert_temp(poly_focus_armed, false));
         }
         if ui.input(|i| i.key_pressed(egui::Key::F7)) {
-            app.grid_on = !app.grid_on;
+            app.snap_on = !app.snap_on;
         }
         if ui.input(|i| i.key_pressed(egui::Key::F8)) {
+            app.grid_on = !app.grid_on;
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::F9)) {
+            app.grid_snap_on = !app.grid_snap_on;
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::F10)) {
             app.polar_on = !app.polar_on;
             if app.polar_on {
                 app.ortho_on = false;
             }
         }
-        if ui.input(|i| i.key_pressed(egui::Key::F9)) {
-            app.snap_on = !app.snap_on;
+        if ui.input(|i| i.key_pressed(egui::Key::F11)) {
+            app.track_on = !app.track_on;
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::F12)) {
+            app.dyn_on = !app.dyn_on;
         }
         if focused_id.is_none() && !palette_open && ui_state.editing_text.is_none() {
             let mods = ui.input(|i| i.modifiers);
@@ -712,15 +721,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     (Key::M, "MOVE"),
                     (Key::C, "COPY"),
                     (Key::R, "ROTATE"),
-                    (Key::S, "SCALE"),
+                    (Key::S, "STRETCH"),
+                    (Key::A, "SCALE"),
                     (Key::I, "MIRROR"),
                     (Key::O, "OFFSET"),
                     (Key::T, "TRIM"),
                     (Key::E, "EXTEND"),
                     (Key::F, "FILLET"),
                     (Key::H, "CHAMFER"),
-                    (Key::W, "STRETCH"),
-                    (Key::X, "EXPLODE"),
+                    (Key::X, "DISJOINT"),
                     (Key::J, "JOIN"),
                 ];
                 for (k, cmd) in MODIFY {
@@ -793,19 +802,27 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             let (r, g, b) = resolve_color(app, e);
             let selected = selected_set.contains(&e.id);
             let hovered = !selected && Some(e.id) == hovered_id;
+            let is_hatch = matches!(e.kind, EntityKind::Hatch { .. });
             let color = if selected {
-                Color32::from_rgb(0, 200, 255)
+                if is_hatch {
+                    HATCH_SELECT
+                } else {
+                    Color32::from_rgb(0, 200, 255)
+                }
             } else if hovered {
                 Color32::from_rgb(120, 230, 255)
             } else {
                 Color32::from_rgb(r, g, b)
             };
+            // Base width comes from the entity's resolved line weight; selection
+            // and hover add a little on top for emphasis.
+            let base = resolve_line_weight_px(app, e);
             let width = if selected {
-                2.5
+                base + 1.0
             } else if hovered {
-                2.0
+                base + 0.5
             } else {
-                1.5
+                base
             };
             let (hatch_tris, hatch_loops) = if matches!(e.kind, EntityKind::Hatch { .. }) {
                 match ui_state.hatch_cache.get(&e.id) {
@@ -821,6 +838,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 e,
                 origin,
                 Stroke::new(width, color),
+                selected,
                 hatch_tris,
                 hatch_loops,
             );
@@ -1079,6 +1097,36 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             );
             let guide_stroke = Stroke::new(1.0, crate::theme::SNAP);
             draw_dashed_line(&painter, p_start, p_end, guide_stroke, 6.0, 6.0);
+        }
+        if !app.interaction.active_guides.is_empty() {
+            // Draw each guide as a ray from its source point (a line's endpoint,
+            // a tracked feature, or the reference point) through the locked
+            // cursor and a little beyond — not a full-canvas line.
+            let stroke = Stroke::new(1.0, crate::theme::SNAP);
+            let overshoot = app.view.pixel_world_size() * 28.0;
+            let (cwx, cwy) = app.cursor_world;
+            for g in &app.interaction.active_guides {
+                let along = (cwx - g.origin.0) * g.dir.0 + (cwy - g.origin.1) * g.dir.1;
+                let sgn = if along >= 0.0 { 1.0 } else { -1.0 };
+                let end = (
+                    cwx + g.dir.0 * overshoot * sgn,
+                    cwy + g.dir.1 * overshoot * sgn,
+                );
+                let a = to_screen(g.origin.0, g.origin.1);
+                let b = to_screen(end.0, end.1);
+                draw_dashed_line(&painter, a, b, stroke, 6.0, 6.0);
+            }
+            let mut labels: Vec<&str> =
+                app.interaction.active_guides.iter().map(|g| g.kind.label()).collect();
+            labels.dedup();
+            let cc = to_screen(app.cursor_world.0, app.cursor_world.1);
+            painter.text(
+                cc + vec2(15.0, -15.0),
+                egui::Align2::LEFT_BOTTOM,
+                labels.join(" + "),
+                egui::FontId::proportional(11.0),
+                crate::theme::SNAP,
+            );
         }
         let cursor = Point2d::from_f64(app.cursor_world.0, app.cursor_world.1);
         let preview_stroke = Stroke::new(1.5, crate::theme::PREVIEW);

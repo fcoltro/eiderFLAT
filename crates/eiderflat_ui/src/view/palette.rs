@@ -8,8 +8,10 @@ enum Action {
     Cmd(&'static str),
     ToggleGrid,
     ToggleSnap,
+    ToggleGridSnap,
     ToggleOrtho,
     TogglePolar,
+    ToggleTrack,
     ToggleDyn,
 }
 
@@ -26,7 +28,7 @@ const ENTRIES: &[Entry] = &[
     // ── Tools ──────────────────────────────────────────────────────────────
     Entry {
         name: "Select",
-        hint: "V",
+        hint: "Esc",
         keywords: "pick arrow",
         group: "Tools",
         icon: Icon::Select,
@@ -42,7 +44,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Polyline",
-        hint: "PL",
+        hint: "P",
         keywords: "draw connected",
         group: "Tools",
         icon: Icon::Polyline,
@@ -58,7 +60,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Ellipse",
-        hint: "EL",
+        hint: "E",
         keywords: "draw oval",
         group: "Tools",
         icon: Icon::Ellipse,
@@ -74,7 +76,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Rectangle",
-        hint: "REC",
+        hint: "R",
         keywords: "draw box square",
         group: "Tools",
         icon: Icon::Rectangle,
@@ -82,7 +84,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Polygon",
-        hint: "POL",
+        hint: "G",
         keywords: "draw hexagon sides",
         group: "Tools",
         icon: Icon::Polygon,
@@ -90,7 +92,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Spline",
-        hint: "SPL",
+        hint: "S",
         keywords: "draw bezier curve",
         group: "Tools",
         icon: Icon::Spline,
@@ -107,7 +109,7 @@ const ENTRIES: &[Entry] = &[
     // ── Modify ─────────────────────────────────────────────────────────────
     Entry {
         name: "Move",
-        hint: "M",
+        hint: "Shift M",
         keywords: "modify translate",
         group: "Modify",
         icon: Icon::Move,
@@ -115,7 +117,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Copy",
-        hint: "CO",
+        hint: "Shift C",
         keywords: "modify duplicate",
         group: "Modify",
         icon: Icon::Copy,
@@ -123,7 +125,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Rotate",
-        hint: "RO",
+        hint: "Shift R",
         keywords: "modify turn angle",
         group: "Modify",
         icon: Icon::Rotate,
@@ -131,7 +133,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Scale",
-        hint: "SC",
+        hint: "Shift A",
         keywords: "modify resize",
         group: "Modify",
         icon: Icon::Scale,
@@ -139,7 +141,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Mirror",
-        hint: "MI",
+        hint: "Shift I",
         keywords: "modify reflect flip",
         group: "Modify",
         icon: Icon::Mirror,
@@ -147,7 +149,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Offset",
-        hint: "O",
+        hint: "Shift O",
         keywords: "modify parallel",
         group: "Modify",
         icon: Icon::Offset,
@@ -155,7 +157,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Trim",
-        hint: "TR",
+        hint: "Shift T",
         keywords: "modify cut",
         group: "Modify",
         icon: Icon::Trim,
@@ -163,7 +165,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Extend",
-        hint: "EX",
+        hint: "Shift E",
         keywords: "modify lengthen",
         group: "Modify",
         icon: Icon::Extend,
@@ -171,7 +173,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Fillet",
-        hint: "F",
+        hint: "Shift F",
         keywords: "modify round corner radius",
         group: "Modify",
         icon: Icon::Fillet,
@@ -179,7 +181,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Chamfer",
-        hint: "CHA",
+        hint: "Shift H",
         keywords: "modify bevel corner",
         group: "Modify",
         icon: Icon::Chamfer,
@@ -187,7 +189,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Stretch",
-        hint: "S",
+        hint: "Shift S",
         keywords: "modify deform window",
         group: "Modify",
         icon: Icon::Stretch,
@@ -195,7 +197,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Disjoint",
-        hint: "X",
+        hint: "Shift X",
         keywords: "explode ungroup separate break apart",
         group: "Modify",
         icon: Icon::Explode,
@@ -203,7 +205,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Join",
-        hint: "J",
+        hint: "Shift J",
         keywords: "modify merge connect weld combine",
         group: "Modify",
         icon: Icon::Join,
@@ -219,7 +221,7 @@ const ENTRIES: &[Entry] = &[
     },
     Entry {
         name: "Erase",
-        hint: "E",
+        hint: "Del",
         keywords: "delete remove",
         group: "Modify",
         icon: Icon::Delete,
@@ -228,7 +230,7 @@ const ENTRIES: &[Entry] = &[
     // ── View ───────────────────────────────────────────────────────────────
     Entry {
         name: "Zoom Extents",
-        hint: "Z E",
+        hint: "Z",
         keywords: "fit view all frame",
         group: "View",
         icon: Icon::ZoomFit,
@@ -259,44 +261,60 @@ const ENTRIES: &[Entry] = &[
         action: Action::Cmd("REDO"),
     },
     Entry {
-        name: "Toggle Grid",
+        name: "Toggle Object Snap",
         hint: "F7",
+        keywords: "snap osnap endpoint midpoint",
+        group: "View",
+        icon: Icon::Select,
+        action: Action::ToggleSnap,
+    },
+    Entry {
+        name: "Toggle Grid",
+        hint: "F8",
         keywords: "view background lines",
         group: "View",
         icon: Icon::ZoomFit,
         action: Action::ToggleGrid,
     },
     Entry {
-        name: "Toggle Object Snap",
+        name: "Toggle Snap to Grid",
         hint: "F9",
-        keywords: "osnap endpoint midpoint",
+        keywords: "gsnap grid snap step",
         group: "View",
-        icon: Icon::Select,
-        action: Action::ToggleSnap,
+        icon: Icon::ZoomFit,
+        action: Action::ToggleGridSnap,
     },
     Entry {
-        name: "Toggle Ortho",
-        hint: "F8",
-        keywords: "horizontal vertical lock",
-        group: "View",
-        icon: Icon::Pan,
-        action: Action::ToggleOrtho,
-    },
-    Entry {
-        name: "Toggle Polar Tracking",
-        hint: "",
-        keywords: "angle 45 guide",
+        name: "Toggle Guides (Polar Tracking)",
+        hint: "F10",
+        keywords: "guides polar angle 45",
         group: "View",
         icon: Icon::Pan,
         action: Action::TogglePolar,
     },
     Entry {
+        name: "Toggle Track (Extension Tracking)",
+        hint: "F11",
+        keywords: "track extension guide colinear axis",
+        group: "View",
+        icon: Icon::Pan,
+        action: Action::ToggleTrack,
+    },
+    Entry {
         name: "Toggle Dynamic Input",
-        hint: "",
+        hint: "F12",
         keywords: "dyn hud length angle",
         group: "View",
         icon: Icon::Pan,
         action: Action::ToggleDyn,
+    },
+    Entry {
+        name: "Toggle Ortho",
+        hint: "",
+        keywords: "horizontal vertical lock",
+        group: "View",
+        icon: Icon::Pan,
+        action: Action::ToggleOrtho,
     },
 ];
 
@@ -330,6 +348,7 @@ fn run_entry(app: &mut AppState, e: &Entry) {
         Action::Cmd(c) => app.run_command(c),
         Action::ToggleGrid => app.grid_on = !app.grid_on,
         Action::ToggleSnap => app.snap_on = !app.snap_on,
+        Action::ToggleGridSnap => app.grid_snap_on = !app.grid_snap_on,
         Action::ToggleOrtho => {
             app.ortho_on = !app.ortho_on;
             if app.ortho_on {
@@ -342,6 +361,7 @@ fn run_entry(app: &mut AppState, e: &Entry) {
                 app.ortho_on = false;
             }
         }
+        Action::ToggleTrack => app.track_on = !app.track_on,
         Action::ToggleDyn => app.dyn_on = !app.dyn_on,
     }
 }
@@ -451,7 +471,7 @@ pub(super) fn command_bar(
     let open_id = egui::Id::new("palette_open_state");
     let mut open = ctx.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
 
-    // Ctrl+K / Ctrl+F (or a toolbar/menu request) opens + focuses the palette.
+    // Ctrl+F (or a toolbar/menu request) opens + focuses the palette.
     let menu_request = ctx.data(|d| {
         d.get_temp::<bool>(egui::Id::new("open_palette"))
             .unwrap_or(false)
@@ -460,8 +480,7 @@ pub(super) fn command_bar(
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("open_palette"), false));
     }
     let mut focus_request = false;
-    let kbd_open = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::F))
-        || ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::K));
+    let kbd_open = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::F));
     if kbd_open || menu_request {
         open = true;
         focus_request = true;

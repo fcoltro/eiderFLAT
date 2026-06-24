@@ -1,9 +1,20 @@
-use super::tessellate::draw_curve;
+use super::tessellate::{draw_curve, draw_curve_patterned};
 use crate::state::AppState;
 use crate::tools::Tool;
 use egui::{Color32, Stroke, pos2, vec2};
-use eiderflat_document::{Color, EntityId, EntityKind};
+use eiderflat_document::{Color, EntityId, EntityKind, LineTypeRef};
 use eiderflat_geometry::{Curve, CurveSegment, Point2d};
+
+/// Screen pixels per millimetre of line weight. Line weights are shown at a
+/// fixed on-screen scale (independent of zoom), like AutoCAD's lineweight
+/// display, so a heavy line reads as heavy at any zoom.
+const LW_PX_PER_MM: f32 = 5.0;
+/// Hairline width used when an entity has no assigned weight (the default).
+pub(super) const HAIRLINE_PX: f32 = 1.5;
+
+/// Selection highlight colour for a hatch — a saturated blue, distinct from the
+/// cyan used for every other selected entity.
+pub(super) const HATCH_SELECT: Color32 = Color32::from_rgb(64, 120, 255);
 
 pub(super) fn tool_prompt(tool: &Tool) -> String {
     match tool {
@@ -443,6 +454,57 @@ pub(super) fn resolve_color(app: &AppState, e: &eiderflat_document::Entity) -> (
     }
 }
 
+/// The on-screen base line width (px) for an entity, resolved from its weight
+/// (or its layer's weight when it is "by layer"). Falls back to a hairline when
+/// the effective weight is zero — the default "no weight" look.
+pub(super) fn resolve_line_weight_px(app: &AppState, e: &eiderflat_document::Entity) -> f32 {
+    let layer_mm = app
+        .document
+        .layers
+        .get(e.layer)
+        .map(|l| l.line_weight_mm)
+        .unwrap_or(0.0);
+    let mm = e.line_weight.to_mm(layer_mm) as f32;
+    (mm * LW_PX_PER_MM).max(HAIRLINE_PX)
+}
+
+/// The dash pattern (screen px, sign-encoded) for an entity's line type,
+/// resolved through "by layer" and scaled to the current zoom. An empty vector
+/// means a solid line.
+pub(super) fn resolve_line_pattern(app: &AppState, e: &eiderflat_document::Entity) -> Vec<f32> {
+    // Resolve the named line type, following "by layer" to the layer's type.
+    let name = match &e.line_type {
+        LineTypeRef::Named(n) => Some(n.clone()),
+        LineTypeRef::ByLayer | LineTypeRef::ByBlock => app
+            .document
+            .layers
+            .get(e.layer)
+            .and_then(|l| match &l.line_type {
+                LineTypeRef::Named(n) => Some(n.clone()),
+                _ => None,
+            }),
+    };
+    let Some(name) = name else {
+        return Vec::new();
+    };
+    if name == "Continuous" {
+        return Vec::new();
+    }
+    let Some(def) = app.document.line_types.iter().find(|d| d.name == name) else {
+        return Vec::new();
+    };
+    if def.pattern.is_empty() {
+        return Vec::new();
+    }
+    // Pattern lengths are in drawing units; convert to screen pixels so dashes
+    // track the zoom (longer when zoomed in).
+    let px_per_world = (1.0 / app.view.pixel_world_size()) as f32;
+    def.pattern
+        .iter()
+        .map(|v| *v as f32 * px_per_world)
+        .collect()
+}
+
 pub(super) fn refresh_hatch_cache(app: &AppState, cache: &mut super::HatchCache) {
     use std::collections::HashSet;
     let target = (app.view.pixel_world_size() * 0.4).max(1e-9);
@@ -501,6 +563,7 @@ pub(super) fn draw_entity(
     e: &eiderflat_document::Entity,
     origin: egui::Pos2,
     stroke: Stroke,
+    selected: bool,
     hatch_tris: Option<&[[Point2d; 3]]>,
     hatch_loops: Option<&[Vec<Point2d>]>,
 ) {
@@ -576,7 +639,10 @@ pub(super) fn draw_entity(
     }
 
     match &e.kind {
-        EntityKind::Curve(c) => draw_curve(painter, c, &to_screen, stroke),
+        EntityKind::Curve(c) => {
+            let pattern = resolve_line_pattern(app, e);
+            draw_curve_patterned(painter, c, &to_screen, stroke, &pattern);
+        }
         EntityKind::Point(p) => {
             let (x, y) = p.to_f64();
             painter.circle_filled(to_screen(x, y), 2.0, stroke.color);
@@ -634,7 +700,13 @@ pub(super) fn draw_entity(
             pattern,
         } => {
             use eiderflat_document::HatchPattern;
-            let fill_col = Color32::from_rgb(fill.0, fill.1, fill.2);
+            // A selected hatch reads as blue (fill + pattern) so it's obviously
+            // distinct from the cyan used for selected lines/curves.
+            let fill_col = if selected {
+                Color32::from_rgba_unmultiplied(64, 120, 255, 130)
+            } else {
+                Color32::from_rgb(fill.0, fill.1, fill.2)
+            };
             match pattern {
                 HatchPattern::Solid => {
                     let computed;

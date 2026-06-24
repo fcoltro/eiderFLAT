@@ -2,11 +2,13 @@ pub mod draw;
 pub mod edit;
 pub mod grips;
 pub mod hatch;
+pub mod infer;
 pub mod inquiry;
 pub mod selection;
 pub mod snap;
 
 pub use draw as commands;
+pub use infer::{Guide, GuideKind, InferResult, infer_axis};
 pub use grips::{Grip, GripRole, apply_grip, apply_grip_value, grip_value_label, grips_for};
 pub use hatch::{
     boundary_loop, outline_loops as hatch_outline_loops, pattern_dots as hatch_pattern_dots,

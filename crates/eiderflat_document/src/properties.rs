@@ -72,6 +72,15 @@ impl LineTypeDef {
             pattern: vec![0.5, -0.25],
         }
     }
+    pub fn dotted() -> Self {
+        // A zero-length "dash" is drawn as a dot by the renderer; the gap sets
+        // the spacing between dots.
+        LineTypeDef {
+            name: "Dotted".into(),
+            description: ". . . .".into(),
+            pattern: vec![0.0, -0.2],
+        }
+    }
     pub fn center() -> Self {
         LineTypeDef {
             name: "Center".into(),

@@ -17,7 +17,9 @@ impl Layer {
             name: name.into(),
             color: (255, 255, 255),
             line_type: LineTypeRef::Named("Continuous".into()),
-            line_weight_mm: 0.25,
+            // Hairline by default — entities show "no weight" until a layer or
+            // entity weight is explicitly assigned.
+            line_weight_mm: 0.0,
             on: true,
             frozen: false,
             locked: false,

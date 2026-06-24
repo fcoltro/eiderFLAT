@@ -23,6 +23,97 @@ pub(super) fn draw_curve(
     }
 }
 
+/// Draw a curve with a line-type dash pattern. `pattern_px` alternates lengths
+/// in screen pixels, sign-encoded: a positive value is a drawn dash, a negative
+/// value a gap, and a zero a dot. An empty pattern draws solid (like
+/// [`draw_curve`]).
+pub(super) fn draw_curve_patterned(
+    painter: &egui::Painter,
+    c: &Curve,
+    to_screen: &impl Fn(f64, f64) -> egui::Pos2,
+    stroke: Stroke,
+    pattern_px: &[f32],
+) {
+    if pattern_px.is_empty() {
+        draw_curve(painter, c, to_screen, stroke);
+        return;
+    }
+    let pts = match c {
+        Curve::Line(l) => {
+            let (x0, y0) = l.p0.to_f64();
+            let (x1, y1) = l.p1.to_f64();
+            vec![to_screen(x0, y0), to_screen(x1, y1)]
+        }
+        other => flatten_curve(other, to_screen),
+    };
+    draw_patterned_polyline(painter, &pts, stroke, pattern_px);
+}
+
+/// Walk a dash pattern along a polyline, carrying the pattern phase across
+/// vertices so dashes stay continuous through corners.
+pub(super) fn draw_patterned_polyline(
+    painter: &egui::Painter,
+    pts: &[egui::Pos2],
+    stroke: Stroke,
+    pattern_px: &[f32],
+) {
+    if pts.len() < 2 {
+        return;
+    }
+    // Total pattern length; if it's degenerate, fall back to a solid line so we
+    // never spin forever on an all-zero pattern.
+    let total: f32 = pattern_px.iter().map(|v| v.abs()).sum();
+    if total <= 1e-3 {
+        painter.add(egui::Shape::line(pts.to_vec(), stroke));
+        return;
+    }
+    let dot_r = (stroke.width * 0.6).max(0.6);
+    let mut pi = 0usize;
+    let mut rem = pattern_px[0].abs();
+    // Pen state for the current element: > 0 dash, 0 dot, < 0 gap.
+    let mut elem = pattern_px[0];
+    // Draw a dot if the very first element is one.
+    if elem == 0.0 {
+        painter.circle_filled(pts[0], dot_r, stroke.color);
+    }
+    let mut guard = 0u32;
+    for seg in pts.windows(2) {
+        let (a, b) = (seg[0], seg[1]);
+        let d = b - a;
+        let seg_len = d.length();
+        if seg_len < 1e-6 {
+            continue;
+        }
+        let dir = d / seg_len;
+        let mut cursor = 0.0f32;
+        while cursor < seg_len - 1e-6 {
+            guard += 1;
+            if guard > 200_000 {
+                return;
+            }
+            if elem == 0.0 {
+                // Dot at the current position, then advance to the next element.
+                painter.circle_filled(a + dir * cursor, dot_r, stroke.color);
+                pi = (pi + 1) % pattern_px.len();
+                elem = pattern_px[pi];
+                rem = elem.abs();
+                continue;
+            }
+            let take = rem.min(seg_len - cursor);
+            if elem > 0.0 && take > 0.0 {
+                painter.line_segment([a + dir * cursor, a + dir * (cursor + take)], stroke);
+            }
+            cursor += take;
+            rem -= take;
+            if rem <= 1e-4 {
+                pi = (pi + 1) % pattern_px.len();
+                elem = pattern_px[pi];
+                rem = elem.abs();
+            }
+        }
+    }
+}
+
 pub(super) fn flatten_curve(
     c: &Curve,
     to_screen: &impl Fn(f64, f64) -> egui::Pos2,

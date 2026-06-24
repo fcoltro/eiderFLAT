@@ -1,6 +1,6 @@
 use eiderflat_cad::{
-    Grip, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps_excluding, grips_for,
-    pick_at,
+    Grip, Guide, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps_excluding,
+    grips_for, infer_axis, pick_at,
 };
 use eiderflat_document::{Document, EntityId, EntityKind, Layer};
 use eiderflat_geometry::{Curve, Point2d};
@@ -27,6 +27,7 @@ pub struct AppState {
     pub grid_snap_on: bool,
     pub ortho_on: bool,
     pub polar_on: bool,
+    pub track_on: bool,
     pub dyn_on: bool,
     pub last_command: Option<String>,
     pub history: History,
@@ -49,6 +50,9 @@ pub struct InteractionState {
     pub bbox_drag: Option<BboxDrag>,
     pub corner_action: Option<CornerAction>,
     pub active_guide: Option<((f64, f64), f64)>,
+    /// Inference/tracking guides the cursor is currently locked onto (drawn as
+    /// dashed construction lines). Empty when not tracking.
+    pub active_guides: Vec<Guide>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +97,16 @@ fn seed_default_layers(doc: &mut eiderflat_document::Document) {
     }
 }
 
+/// The two endpoints of a straight line entity, in world coordinates. `None`
+/// for anything that isn't a single line segment (axis tracking only applies to
+/// lines).
+fn line_endpoints(kind: &EntityKind) -> Option<((f64, f64), (f64, f64))> {
+    match kind {
+        EntityKind::Curve(Curve::Line(l)) => Some((l.p0.to_f64(), l.p1.to_f64())),
+        _ => None,
+    }
+}
+
 impl AppState {
     pub fn new(canvas_w: f64, canvas_h: f64) -> Self {
         let mut document = Document::new();
@@ -110,6 +124,7 @@ impl AppState {
             grid_snap_on: false,
             ortho_on: false,
             polar_on: true,
+            track_on: true,
             dyn_on: true,
             last_command: None,
             history: History::new(),
@@ -155,6 +170,7 @@ impl AppState {
         };
 
         self.interaction.active_guide = None;
+        self.interaction.active_guides.clear();
 
         if let Some(ref sp) = self.active_snap {
             self.cursor_world = sp.pos;
@@ -211,6 +227,22 @@ impl AppState {
                 }
             } else {
                 self.cursor_world = (wx, wy);
+            }
+        }
+
+        // Line-extension guide, kept entirely separate from the object-snapping
+        // above. It only acts while grip-dragging a line endpoint, and only when
+        // no snap already claimed the cursor: lock onto the dragged line's
+        // *original* axis so the endpoint stays colinear with where the line was.
+        if self.track_on
+            && self.active_snap.is_none()
+            && let Some(drag) = self.interaction.grip_drag.as_ref()
+            && let Some((a, b)) = line_endpoints(&drag.start_kind)
+        {
+            let tol = self.view.pixel_world_size() * 10.0;
+            if let Some(res) = infer_axis(a, b, (wx, wy), tol) {
+                self.cursor_world = res.point;
+                self.interaction.active_guides = res.guides;
             }
         }
     }

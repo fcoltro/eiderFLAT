@@ -91,6 +91,7 @@ impl Default for Document {
             line_types: vec![
                 LineTypeDef::continuous(),
                 LineTypeDef::dashed(),
+                LineTypeDef::dotted(),
                 LineTypeDef::center(),
             ],
             blocks: HashMap::new(),

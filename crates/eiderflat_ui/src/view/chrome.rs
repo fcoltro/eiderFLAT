@@ -178,7 +178,7 @@ fn search_button() -> impl egui::Widget {
             egui::FontId::proportional(12.5),
             crate::theme::TEXT_DIM,
         );
-        // Two separate keycaps on the right — "Ctrl" and "K" — instead of one
+        // Two separate keycaps on the right — "Ctrl" and "F" — instead of one
         // combined badge.
         let cap = |p: &egui::Painter, right: f32, text: &str| -> f32 {
             let galley = p.layout_no_wrap(
@@ -208,7 +208,7 @@ fn search_button() -> impl egui::Widget {
             kr.left()
         };
         let mut right = rect.right() - 10.0;
-        right = cap(p, right, "K") - 4.0;
+        right = cap(p, right, "F") - 4.0;
         cap(p, right, "Ctrl");
         resp
     }
@@ -364,7 +364,10 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         {
             app.erase_selection();
         }
-        if ui.button("Select All").clicked() {
+        if ui
+            .add(egui::Button::new("Select All").shortcut_text("Ctrl+A"))
+            .clicked()
+        {
             app.execute(Command::SelectAll);
         }
         ui.separator();
@@ -384,9 +387,23 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             app.zoom_extents();
         }
         ui.separator();
-        ui.checkbox(&mut app.grid_on, "Grid  (F7)");
-        ui.checkbox(&mut app.grid_snap_on, "Snap to Grid");
-        ui.checkbox(&mut app.snap_on, "Object Snap  (F9)");
+        ui.checkbox(&mut app.snap_on, "Object Snap  (F7)");
+        ui.checkbox(&mut app.grid_on, "Grid  (F8)");
+        ui.checkbox(&mut app.grid_snap_on, "Snap to Grid  (F9)");
+        // Polar and Ortho are mutually exclusive, so route the toggle through
+        // the same exclusion the F10 key and the pill chip use.
+        let mut polar = app.polar_on;
+        if ui
+            .checkbox(&mut polar, "Guides — Polar Tracking  (F10)")
+            .changed()
+        {
+            app.polar_on = polar;
+            if polar {
+                app.ortho_on = false;
+            }
+        }
+        ui.checkbox(&mut app.track_on, "Track — Extension Tracking  (F11)");
+        ui.checkbox(&mut app.dyn_on, "Dynamic Input  (F12)");
     });
     ui.menu_button("Draw", |ui| {
         tool_menu_item(ui, app, "Select", Tool::Select);
@@ -515,14 +532,14 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         );
         ui.separator();
         if ui
-            .add(egui::Button::new("Disjoint").shortcut_text("X"))
+            .add(egui::Button::new("Disjoint").shortcut_text("Shift+X"))
             .clicked()
         {
             app.explode_selection();
             ui.close();
         }
         if ui
-            .add(egui::Button::new("Join").shortcut_text("J"))
+            .add(egui::Button::new("Join").shortcut_text("Shift+J"))
             .clicked()
         {
             app.join_selection();
@@ -641,27 +658,27 @@ pub(super) fn font_combo(ui: &mut egui::Ui, salt: &str, font: &mut Option<String
 }
 fn tool_hotkey(tool: &Tool) -> &'static str {
     match tool {
-        Tool::Select => "SE",
+        Tool::Select => "Esc",
         Tool::Line { .. } => "L",
-        Tool::Polyline { .. } => "PL",
+        Tool::Polyline { .. } => "P",
         Tool::Circle { .. } => "C",
-        Tool::Ellipse { .. } => "EL",
+        Tool::Ellipse { .. } => "E",
         Tool::Arc3 { .. } => "A",
-        Tool::Rectangle { .. } => "REC",
-        Tool::Polygon { .. } => "POL",
-        Tool::Spline { .. } => "SPL",
+        Tool::Rectangle { .. } => "R",
+        Tool::Polygon { .. } => "G",
+        Tool::Spline { .. } => "S",
         Tool::Text { .. } => "T",
-        Tool::Move { .. } => "M",
-        Tool::Copy { .. } => "CO",
-        Tool::Rotate { .. } => "RO",
-        Tool::Scale { .. } => "SC",
-        Tool::Mirror { .. } => "MI",
-        Tool::Offset { .. } => "O",
-        Tool::Trim => "TR",
-        Tool::Extend => "EX",
-        Tool::Fillet { .. } => "F",
-        Tool::Chamfer { .. } => "CHA",
-        Tool::Stretch { .. } => "S",
+        Tool::Move { .. } => "Shift+M",
+        Tool::Copy { .. } => "Shift+C",
+        Tool::Rotate { .. } => "Shift+R",
+        Tool::Scale { .. } => "Shift+A",
+        Tool::Mirror { .. } => "Shift+I",
+        Tool::Offset { .. } => "Shift+O",
+        Tool::Trim => "Shift+T",
+        Tool::Extend => "Shift+E",
+        Tool::Fillet { .. } => "Shift+F",
+        Tool::Chamfer { .. } => "Shift+H",
+        Tool::Stretch { .. } => "Shift+S",
         Tool::Hatch => "H",
     }
 }
@@ -692,7 +709,7 @@ fn run_act(app: &mut AppState, act: &Act) {
 fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     vec![
-        (Icon::Select, "Select  (SE)", Act::Tool(Tool::Select)),
+        (Icon::Select, "Select  (Esc)", Act::Tool(Tool::Select)),
         (
             Icon::Line,
             "Line  (L)",
@@ -700,7 +717,7 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Polyline,
-            "Polyline  (PL)",
+            "Polyline  (P)",
             Act::Tool(Tool::Polyline { pts: vec![] }),
         ),
         (
@@ -710,7 +727,7 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Ellipse,
-            "Ellipse  (EL) — center, axis end, then minor axis",
+            "Ellipse  (E) — center, axis end, then minor axis",
             Act::Tool(Tool::Ellipse {
                 center: None,
                 axis_end: None,
@@ -723,12 +740,12 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Rectangle,
-            "Rectangle  (REC)",
+            "Rectangle  (R)",
             Act::Tool(Tool::Rectangle { first: None }),
         ),
         (
             Icon::Polygon,
-            "Polygon  (POL)",
+            "Polygon  (G)",
             Act::Tool(Tool::Polygon {
                 center: None,
                 sides: None,
@@ -736,7 +753,7 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Spline,
-            "Spline  (SPL)",
+            "Spline  (S)",
             Act::Tool(Tool::Spline { pts: vec![] }),
         ),
         (
@@ -755,7 +772,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     vec![
         (
             Icon::Move,
-            "Move selection  (M)",
+            "Move selection  (Shift+M)",
             Act::Tool(Tool::Move {
                 base: None,
                 ids: vec![],
@@ -763,7 +780,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Copy,
-            "Copy selection  (CO)",
+            "Copy selection  (Shift+C)",
             Act::Tool(Tool::Copy {
                 base: None,
                 ids: vec![],
@@ -771,7 +788,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Rotate,
-            "Rotate selection  (RO)",
+            "Rotate selection  (Shift+R)",
             Act::Tool(Tool::Rotate {
                 base: None,
                 ids: vec![],
@@ -779,7 +796,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Scale,
-            "Scale selection  (SC)",
+            "Scale selection  (Shift+A)",
             Act::Tool(Tool::Scale {
                 base: None,
                 reference: None,
@@ -788,7 +805,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Mirror,
-            "Mirror selection  (MI)",
+            "Mirror selection  (Shift+I)",
             Act::Tool(Tool::Mirror {
                 first: None,
                 ids: vec![],
@@ -796,7 +813,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Offset,
-            "Offset  (O) — type a distance, click curve, click side",
+            "Offset  (Shift+O) — type a distance, click curve, click side",
             Act::Tool(Tool::Offset {
                 dist: 1.0,
                 source: None,
@@ -804,17 +821,17 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Trim,
-            "Trim  (TR) — click the piece to cut",
+            "Trim  (Shift+T) — click the piece to cut",
             Act::Tool(Tool::Trim),
         ),
         (
             Icon::Extend,
-            "Extend  (EX) — click the end to lengthen",
+            "Extend  (Shift+E) — click the end to lengthen",
             Act::Tool(Tool::Extend),
         ),
         (
             Icon::Fillet,
-            "Fillet  (F) — type radius, pick 2 lines",
+            "Fillet  (Shift+F) — type radius, pick 2 lines",
             Act::Tool(Tool::Fillet {
                 radius: 1.0,
                 first: None,
@@ -822,7 +839,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Chamfer,
-            "Chamfer  (CHA) — type distance, pick 2 lines",
+            "Chamfer  (Shift+H) — type distance, pick 2 lines",
             Act::Tool(Tool::Chamfer {
                 dist: 1.0,
                 first: None,
@@ -830,7 +847,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Stretch,
-            "Stretch  (S) — window, then base→destination",
+            "Stretch  (Shift+S) — window, then base→destination",
             Act::Tool(Tool::Stretch {
                 c1: None,
                 c2: None,
@@ -840,12 +857,12 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Explode,
-            "Disjoint  (X) — break a polyline/polygon/rectangle into lines",
+            "Disjoint  (Shift+X) — break a polyline/polygon/rectangle into lines",
             Act::Cmd(Command::Explode),
         ),
         (
             Icon::Join,
-            "Join  (J) — merge selected connected curves",
+            "Join  (Shift+J) — merge selected connected curves",
             Act::Cmd(Command::Join),
         ),
         (
@@ -977,10 +994,13 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         });
                         pill_sep(ui);
 
-                        // ── SNAP master toggle + arrow popup, then the quick chips.
+                        // ── SNAP master toggle + arrow popup, then the quick
+                        // chips, in F7…F12 order: Snap, Grid, GSnap, Guides,
+                        // Track, Dyn.
                         snap_master(ui, app);
                         ui.add_space(6.0);
                         snap_chip(ui, &mut app.grid_on, "Grid");
+                        snap_chip(ui, &mut app.grid_snap_on, "GSnap");
                         let mut polar = app.polar_on;
                         if snap_chip(ui, &mut polar, "Guides") {
                             app.polar_on = polar;
@@ -988,7 +1008,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                                 app.ortho_on = false;
                             }
                         }
-                        snap_chip(ui, &mut app.grid_snap_on, "GSnap");
+                        snap_chip(ui, &mut app.track_on, "Track");
                         snap_chip(ui, &mut app.dyn_on, "Dyn");
                         pill_sep(ui);
 
@@ -1539,6 +1559,8 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                 {
                     l.on = !on;
                 }
+                ui.add_space(6.0);
+                layer_appearance_menus(ui, app, i);
                 ui.add_space(10.0);
                 ui.label(
                     egui::RichText::new(format!("{count:>2}"))
@@ -1589,6 +1611,82 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
     }
 }
 
+/// Compact per-layer "weight" and "line type" menu badges for a layer row.
+/// These set the layer's defaults, which every "by layer" entity inherits.
+fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
+    use eiderflat_document::LineTypeRef;
+
+    // ── Line type badge (short glyph) ──────────────────────────────────────
+    let cur_lt = app
+        .document
+        .layers
+        .get(i)
+        .map(|l| l.line_type.clone())
+        .unwrap_or(LineTypeRef::Named("Continuous".into()));
+    let lt_glyph = match &cur_lt {
+        LineTypeRef::Named(n) if n == "Dashed" => "╌╌",
+        LineTypeRef::Named(n) if n == "Dotted" => "··",
+        LineTypeRef::Named(n) if n == "Center" => "─·",
+        _ => "──",
+    };
+    ui.menu_button(
+        egui::RichText::new(lt_glyph).monospace().size(12.0),
+        |ui| {
+            for (lbl, name) in [
+                ("Solid", "Continuous"),
+                ("Dashed", "Dashed"),
+                ("Dotted", "Dotted"),
+                ("Center", "Center"),
+            ] {
+                let val = LineTypeRef::Named(name.into());
+                if ui.selectable_label(cur_lt == val, lbl).clicked() {
+                    app.history.snapshot(&app.document);
+                    if let Some(l) = app.document.layers.get_mut(i) {
+                        l.line_type = val;
+                    }
+                    ui.close();
+                }
+            }
+        },
+    )
+    .response
+    .on_hover_text("Layer line type");
+
+    // ── Line weight badge (mm, or "—" for hairline) ────────────────────────
+    let cur_w = app
+        .document
+        .layers
+        .get(i)
+        .map(|l| l.line_weight_mm)
+        .unwrap_or(0.0);
+    let w_lbl = if cur_w <= 0.0 {
+        "—".to_string()
+    } else {
+        format!("{cur_w:.2}")
+    };
+    ui.menu_button(
+        egui::RichText::new(w_lbl).monospace().size(11.0),
+        |ui| {
+            for mm in [0.0, 0.13, 0.25, 0.35, 0.50, 0.70, 1.00] {
+                let lbl = if mm <= 0.0 {
+                    "Default (hairline)".to_string()
+                } else {
+                    format!("{mm:.2} mm")
+                };
+                if ui.selectable_label((cur_w - mm).abs() < 1e-9, lbl).clicked() {
+                    app.history.snapshot(&app.document);
+                    if let Some(l) = app.document.layers.get_mut(i) {
+                        l.line_weight_mm = mm;
+                    }
+                    ui.close();
+                }
+            }
+        },
+    )
+    .response
+    .on_hover_text("Layer line weight");
+}
+
 /// Floating contextual toolbar shown just above a single selected entity.
 pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
     if !matches!(app.tool, Tool::Select) || app.selection.len() != 1 {
@@ -1623,7 +1721,7 @@ pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect:
                     ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
                     ui.horizontal(|ui| {
                         use crate::icons::{Icon, icon_button_sized};
-                        if icon_button_sized(ui, Icon::Copy, "Duplicate  (CO)", false, 38.0)
+                        if icon_button_sized(ui, Icon::Copy, "Duplicate  (Shift+C)", false, 38.0)
                             .clicked()
                         {
                             app.execute(Command::Activate(Tool::Copy {
@@ -1631,7 +1729,7 @@ pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect:
                                 ids: vec![],
                             }));
                         }
-                        if icon_button_sized(ui, Icon::Mirror, "Mirror  (MI)", false, 38.0)
+                        if icon_button_sized(ui, Icon::Mirror, "Mirror  (Shift+I)", false, 38.0)
                             .clicked()
                         {
                             app.execute(Command::Activate(Tool::Mirror {
@@ -1639,7 +1737,7 @@ pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect:
                                 ids: vec![],
                             }));
                         }
-                        if icon_button_sized(ui, Icon::Rotate, "Rotate  (RO)", false, 38.0)
+                        if icon_button_sized(ui, Icon::Rotate, "Rotate  (Shift+R)", false, 38.0)
                             .clicked()
                         {
                             app.execute(Command::Activate(Tool::Rotate {
@@ -1647,7 +1745,7 @@ pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect:
                                 ids: vec![],
                             }));
                         }
-                        if icon_button_sized(ui, Icon::Offset, "Offset  (O)", false, 38.0).clicked()
+                        if icon_button_sized(ui, Icon::Offset, "Offset  (Shift+O)", false, 38.0).clicked()
                         {
                             app.execute(Command::Activate(Tool::Offset {
                                 dist: 1.0,
@@ -2003,6 +2101,7 @@ fn appearance_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[eiderflat_do
             ("By layer", LineTypeRef::ByLayer),
             ("Solid", LineTypeRef::Named("Continuous".into())),
             ("Dashed", LineTypeRef::Named("Dashed".into())),
+            ("Dotted", LineTypeRef::Named("Dotted".into())),
             ("Center", LineTypeRef::Named("Center".into())),
         ] {
             if ui
