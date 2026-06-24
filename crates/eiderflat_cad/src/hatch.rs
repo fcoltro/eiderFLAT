@@ -613,13 +613,14 @@ fn trace_pick_region_arrangement(
         })?
         .clone();
 
+    let parts = source_parts(doc);
     let holes: Vec<Vec<Curve>> = polys
         .iter()
         .filter(|p| !polys_equal(p, &outer) && p.iter().all(|&(x, y)| point_in_poly(&outer, x, y)))
-        .map(|p| poly_to_curves(p))
+        .map(|p| recurve_loop(&poly_to_curves(p), &parts))
         .collect();
 
-    Some((poly_to_curves(&outer), holes))
+    Some((recurve_loop(&poly_to_curves(&outer), &parts), holes))
 }
 
 fn collect_segments(doc: &Document) -> Vec<(P, P)> {
@@ -715,6 +716,176 @@ fn poly_to_curves(p: &[P]) -> Vec<Curve> {
             Curve::Line(LineSeg::from_endpoints(pt(a), pt(b)))
         })
         .collect()
+}
+
+/// Sub-curve of `c` between normalized parameters `a <= b` (both in 0..=1).
+fn subcurve(c: &Curve, a: f64, b: f64) -> Curve {
+    use eiderflat_geometry::split_curve;
+    let (a, b) = (a.clamp(0.0, 1.0), b.clamp(0.0, 1.0));
+    if b <= a + 1e-9 {
+        return c.clone();
+    }
+    let right = if a > 1e-9 {
+        split_curve(c, a).1
+    } else {
+        c.clone()
+    };
+    if b < 1.0 - 1e-9 {
+        let bb = ((b - a) / (1.0 - a)).clamp(0.0, 1.0);
+        split_curve(&right, bb).0
+    } else {
+        right
+    }
+}
+
+fn loop_diag(verts: &[P]) -> f64 {
+    let (mut minx, mut miny, mut maxx, mut maxy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for &(x, y) in verts {
+        minx = minx.min(x);
+        miny = miny.min(y);
+        maxx = maxx.max(x);
+        maxy = maxy.max(y);
+    }
+    if minx > maxx {
+        0.0
+    } else {
+        (maxx - minx).hypot(maxy - miny)
+    }
+}
+
+/// Rebuild a traced boundary ring (line segments from the arrangement) back onto
+/// the original document curves wherever the ring follows them. A region hatched
+/// by clicking inside it then keeps the true curve — and stays crisp at any zoom
+/// — instead of the baked polyline the arrangement produces. Anything that
+/// doesn't clearly lie on a single source curve is left as line segments.
+fn recurve_loop(loop_: &[Curve], parts: &[Curve]) -> Vec<Curve> {
+    use eiderflat_geometry::{project_point_onto_curve, reverse_curve};
+    let m = loop_.len();
+    if m < 3 || parts.is_empty() {
+        return loop_.to_vec();
+    }
+    let verts: Vec<P> = loop_
+        .iter()
+        .map(|c| {
+            let (t0, _) = c.domain();
+            c.evaluate_f64(t0)
+        })
+        .collect();
+    let tol = (loop_diag(&verts) * 5e-3).max(5e-3);
+
+    // Which source part (and normalized param) each vertex lies on, if any.
+    let assign = |p: P| -> Option<(usize, f64)> {
+        let mut best: Option<(usize, f64, f64)> = None;
+        for (i, c) in parts.iter().enumerate() {
+            let pr = project_point_onto_curve(c, p.0, p.1);
+            let d = (pr.point.0 - p.0).hypot(pr.point.1 - p.1);
+            if d <= tol && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                let (t0, t1) = c.domain();
+                let span = t1 - t0;
+                let nt = if span.abs() < 1e-12 {
+                    0.0
+                } else {
+                    ((pr.t - t0) / span).clamp(0.0, 1.0)
+                };
+                best = Some((i, nt, d));
+            }
+        }
+        best.map(|(i, t, _)| (i, t))
+    };
+    let va: Vec<Option<(usize, f64)>> = verts.iter().map(|&p| assign(p)).collect();
+
+    // An edge belongs to a part only if both endpoints AND its midpoint lie on
+    // it (so a chord that merely cuts across a curve is not mistaken for it).
+    let edge_part = |k: usize| -> Option<usize> {
+        let (ia, _) = va[k]?;
+        let (ib, _) = va[(k + 1) % m]?;
+        if ia != ib {
+            return None;
+        }
+        let (pa, pb) = (verts[k], verts[(k + 1) % m]);
+        let mid = ((pa.0 + pb.0) * 0.5, (pa.1 + pb.1) * 0.5);
+        let pr = project_point_onto_curve(&parts[ia], mid.0, mid.1);
+        ((pr.point.0 - mid.0).hypot(pr.point.1 - mid.1) <= tol).then_some(ia)
+    };
+    let ep: Vec<Option<usize>> = (0..m).map(edge_part).collect();
+
+    // Whole ring on one part → a single closed source curve (circle/ellipse).
+    if ep[0].is_some() && ep.iter().all(|&e| e == ep[0]) {
+        return vec![parts[ep[0].unwrap()].clone()];
+    }
+
+    // Start at a seam so runs don't straddle the ring's wrap point.
+    let start = (0..m).find(|&k| ep[k] != ep[(k + m - 1) % m]).unwrap_or(0);
+
+    let mut out: Vec<Curve> = Vec::new();
+    let mut k = 0;
+    while k < m {
+        let e = (start + k) % m;
+        let Some(idx) = ep[e] else {
+            out.push(loop_[e].clone());
+            k += 1;
+            continue;
+        };
+        let mut len = 1;
+        while k + len < m && ep[(start + k + len) % m] == Some(idx) {
+            len += 1;
+        }
+        let vend = (e + len) % m;
+        let t0 = va[e].unwrap().1;
+        let t1 = va[vend].unwrap().1;
+        let inc = t1 >= t0;
+        let mut mono = (t1 - t0).abs() > 1e-6;
+        let mut prev = t0;
+        for j in 1..=len {
+            let tj = va[(e + j) % m].unwrap().1;
+            if (inc && tj + 1e-9 < prev) || (!inc && tj > prev + 1e-9) {
+                mono = false;
+                break;
+            }
+            prev = tj;
+        }
+        let piece = mono
+            .then(|| {
+                if inc {
+                    subcurve(&parts[idx], t0, t1)
+                } else {
+                    reverse_curve(&subcurve(&parts[idx], t1, t0))
+                }
+            })
+            .filter(|c| {
+                // The piece must actually start/end at the run's vertices.
+                let (d0, d1) = c.domain();
+                let sp = c.evaluate_f64(d0);
+                let epp = c.evaluate_f64(d1);
+                (sp.0 - verts[e].0).hypot(sp.1 - verts[e].1) <= tol * 2.0
+                    && (epp.0 - verts[vend].0).hypot(epp.1 - verts[vend].1) <= tol * 2.0
+            });
+        match piece {
+            Some(c) => out.push(c),
+            None => {
+                for j in 0..len {
+                    out.push(loop_[(e + j) % m].clone());
+                }
+            }
+        }
+        k += len;
+    }
+    if out.is_empty() { loop_.to_vec() } else { out }
+}
+
+/// Source curve parts (poly segments flattened out) available for re-curving a
+/// traced boundary, ignoring hatches themselves.
+fn source_parts(doc: &Document) -> Vec<Curve> {
+    let mut parts = Vec::new();
+    for e in doc.editable_entities() {
+        if let EntityKind::Curve(c) = &e.kind {
+            match c {
+                Curve::Poly(pc) => parts.extend(pc.segments.iter().cloned()),
+                other => parts.push(other.clone()),
+            }
+        }
+    }
+    parts
 }
 
 fn polys_equal(a: &[P], b: &[P]) -> bool {
@@ -952,6 +1123,45 @@ mod tests {
             !region_contains(&boundary, &holes, 9.5, 6.0),
             "the lens (shared with the other circle) must NOT be filled"
         );
+    }
+
+    #[test]
+    fn arrangement_pick_recovers_source_arc() {
+        // A circle cut by a diameter chord forces the arrangement path. The
+        // half-disc boundary must come back as real arc curves, not a baked
+        // polyline, so the fill stays crisp at any zoom.
+        let mut doc = Document::new();
+        doc.add(full_circle(0.0, 0.0, 5.0));
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pti(-5, 0),
+            pti(5, 0),
+        ))));
+        let (boundary, _holes) =
+            trace_pick_region(&doc, 0.0, 2.0).expect("upper half-disc encloses the click");
+        assert!(
+            boundary.iter().any(|c| matches!(c, Curve::Arc(_))),
+            "the curved side should be recovered as an arc, got {boundary:?}"
+        );
+        assert!(region_contains(&boundary, &[], 0.0, 2.0));
+    }
+
+    #[test]
+    fn arrangement_pick_recovers_source_arc_lower_half() {
+        // Same as above but the picked arc crosses the circle's param seam
+        // (start point at angle 0 = (5,0)).
+        let mut doc = Document::new();
+        doc.add(full_circle(0.0, 0.0, 5.0));
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pti(-5, 0),
+            pti(5, 0),
+        ))));
+        let (boundary, _holes) =
+            trace_pick_region(&doc, 0.0, -2.0).expect("lower half-disc encloses the click");
+        assert!(
+            boundary.iter().any(|c| matches!(c, Curve::Arc(_))),
+            "the curved side should be recovered as an arc, got {boundary:?}"
+        );
+        assert!(region_contains(&boundary, &[], 0.0, -2.0));
     }
 
     #[test]
