@@ -1,5 +1,5 @@
 use eiderflat_boolean::{Region, intersection, union};
-use eiderflat_document::{Document, Entity, EntityKind, HatchPattern};
+use eiderflat_document::{Document, Entity, EntityId, EntityKind, HatchPattern};
 use eiderflat_geometry::{Curve, CurveSegment, LineSeg, Point2d, tessellate_curve};
 use std::collections::HashMap;
 
@@ -405,15 +405,17 @@ fn region_from_closed_loops(
     px: f64,
     py: f64,
 ) -> Option<(Vec<Curve>, Vec<Vec<Curve>>)> {
-    let loops: Vec<Vec<Curve>> = doc
+    let entries: Vec<(EntityId, Vec<Curve>)> = doc
         .editable_entities()
         .filter(|e| !matches!(e.kind, EntityKind::Hatch { .. }))
-        .filter_map(boundary_loop)
-        .filter(|l| !l.is_empty())
+        .filter_map(|e| boundary_loop(e).map(|l| (e.id, l)))
+        .filter(|(_, l)| !l.is_empty())
         .collect();
-    if loops.is_empty() {
+    if entries.is_empty() {
         return None;
     }
+    let ids: Vec<EntityId> = entries.iter().map(|(id, _)| *id).collect();
+    let loops: Vec<Vec<Curve>> = entries.into_iter().map(|(_, l)| l).collect();
     let regions: Vec<Region> = loops.iter().map(|l| Region::new(l.clone())).collect();
 
     let outer_idx = (0..loops.len())
@@ -426,10 +428,12 @@ fn region_from_closed_loops(
                 .unwrap_or(std::cmp::Ordering::Equal)
         })?;
 
-    for i in 0..loops.len() {
-        if i != outer_idx && boundaries_cross(&loops[outer_idx], &loops[i]) {
-            return None;
-        }
+    // Any other curve crossing this loop's boundary (an open line/spline, or
+    // another closed loop) subdivides it into smaller faces. The single closed
+    // loop is then the wrong answer — defer to the planar arrangement, which
+    // resolves which sub-face the click actually landed in.
+    if loop_subdivided(doc, &loops[outer_idx], ids[outer_idx]) {
+        return None;
     }
 
     let islands: Vec<Vec<Curve>> = (0..loops.len())
@@ -468,18 +472,34 @@ fn merge_islands(islands: Vec<Vec<Curve>>) -> Vec<Vec<Curve>> {
         .collect()
 }
 
-fn boundaries_cross(a: &[Curve], b: &[Curve]) -> bool {
-    let pa = loop_polygon(a, default_flatten_tol(a));
-    let pb = loop_polygon(b, default_flatten_tol(b));
-    if pa.len() < 2 || pb.len() < 2 {
+/// Whether any editable curve other than `outer_id` crosses the `outer` loop's
+/// boundary. Such a curve cuts the loop into multiple faces, so a hatch pick
+/// inside it must be resolved by the arrangement rather than by the whole loop.
+fn loop_subdivided(doc: &Document, outer: &[Curve], outer_id: EntityId) -> bool {
+    let po = loop_polygon(outer, default_flatten_tol(outer));
+    if po.len() < 3 {
         return false;
     }
-    for i in 0..pa.len() {
-        let (a0, a1) = (pa[i], pa[(i + 1) % pa.len()]);
-        for j in 0..pb.len() {
-            let (b0, b1) = (pb[j], pb[(j + 1) % pb.len()]);
-            if segments_cross(a0, a1, b0, b1) {
-                return true;
+    for e in doc.editable_entities() {
+        if e.id == outer_id {
+            continue;
+        }
+        let EntityKind::Curve(c) = &e.kind else {
+            continue;
+        };
+        let parts: Vec<Curve> = match c {
+            Curve::Poly(pc) => pc.segments.clone(),
+            other => vec![other.clone()],
+        };
+        for part in &parts {
+            let pts = flatten(part, 3e-3);
+            for w in pts.windows(2) {
+                for i in 0..po.len() {
+                    let (a0, a1) = (po[i], po[(i + 1) % po.len()]);
+                    if segments_cross(a0, a1, w[0], w[1]) {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -738,6 +758,33 @@ fn subcurve(c: &Curve, a: f64, b: f64) -> Curve {
     }
 }
 
+/// Whether `c`'s endpoints coincide (a full circle/ellipse or closed poly),
+/// so its parameter wraps and a sub-run may cross the 0/1 seam.
+fn curve_closed(c: &Curve) -> bool {
+    let (t0, t1) = c.domain();
+    let s = c.evaluate_f64(t0);
+    let e = c.evaluate_f64(t1);
+    (s.0 - e.0).hypot(s.1 - e.1) < 1e-7
+}
+
+/// Forward sub-curve(s) of `c` from normalized param `a` to `b` (`a <= b`). For
+/// a closed curve `b` (or `a`) may fall outside 0..1: the span is split at each
+/// seam (integer) crossing into one curve per arc piece.
+fn arc_pieces(c: &Curve, a: f64, b: f64, closed: bool) -> Vec<Curve> {
+    if !closed || (a >= -1e-9 && b <= 1.0 + 1e-9) {
+        return vec![subcurve(c, a.clamp(0.0, 1.0), b.clamp(0.0, 1.0))];
+    }
+    let mut pieces = Vec::new();
+    let mut s = a;
+    while s < b - 1e-9 {
+        let base = s.floor();
+        let seg_hi = (base + 1.0).min(b);
+        pieces.push(subcurve(c, s - base, seg_hi - base));
+        s = seg_hi;
+    }
+    pieces
+}
+
 fn loop_diag(verts: &[P]) -> f64 {
     let (mut minx, mut miny, mut maxx, mut maxy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
     for &(x, y) in verts {
@@ -831,37 +878,52 @@ fn recurve_loop(loop_: &[Curve], parts: &[Curve]) -> Vec<Curve> {
             len += 1;
         }
         let vend = (e + len) % m;
-        let t0 = va[e].unwrap().1;
-        let t1 = va[vend].unwrap().1;
+        // Unwrap the run's params along the curve. For a closed source curve a
+        // run can cross the 0/1 seam (e.g. an arc through angle 0); unwrapping
+        // keeps it monotonic so it isn't mistaken for a direction reversal.
+        let closed = curve_closed(&parts[idx]);
+        let mut u: Vec<f64> = Vec::with_capacity(len + 1);
+        u.push(va[e].unwrap().1);
+        for j in 1..=len {
+            let raw = va[(e + j) % m].unwrap().1;
+            let prev = *u.last().unwrap();
+            u.push(if closed { raw + (prev - raw).round() } else { raw });
+        }
+        let (t0, t1) = (u[0], u[len]);
         let inc = t1 >= t0;
         let mut mono = (t1 - t0).abs() > 1e-6;
-        let mut prev = t0;
-        for j in 1..=len {
-            let tj = va[(e + j) % m].unwrap().1;
-            if (inc && tj + 1e-9 < prev) || (!inc && tj > prev + 1e-9) {
+        for w in u.windows(2) {
+            if (inc && w[1] + 1e-9 < w[0]) || (!inc && w[1] > w[0] + 1e-9) {
                 mono = false;
                 break;
             }
-            prev = tj;
         }
-        let piece = mono
+        let pieces = mono
             .then(|| {
-                if inc {
-                    subcurve(&parts[idx], t0, t1)
-                } else {
-                    reverse_curve(&subcurve(&parts[idx], t1, t0))
+                let (a, b) = if inc { (t0, t1) } else { (t1, t0) };
+                let mut ps = arc_pieces(&parts[idx], a, b, closed);
+                if !inc {
+                    ps.reverse();
+                    for p in &mut ps {
+                        *p = reverse_curve(p);
+                    }
                 }
+                ps
             })
-            .filter(|c| {
-                // The piece must actually start/end at the run's vertices.
-                let (d0, d1) = c.domain();
-                let sp = c.evaluate_f64(d0);
-                let epp = c.evaluate_f64(d1);
+            .filter(|ps| {
+                // The assembled run must start/end at the run's vertices.
+                let (Some(first), Some(last)) = (ps.first(), ps.last()) else {
+                    return false;
+                };
+                let (f0, _) = first.domain();
+                let (_, l1) = last.domain();
+                let sp = first.evaluate_f64(f0);
+                let epp = last.evaluate_f64(l1);
                 (sp.0 - verts[e].0).hypot(sp.1 - verts[e].1) <= tol * 2.0
                     && (epp.0 - verts[vend].0).hypot(epp.1 - verts[vend].1) <= tol * 2.0
             });
-        match piece {
-            Some(c) => out.push(c),
+        match pieces {
+            Some(ps) => out.extend(ps),
             None => {
                 for j in 0..len {
                     out.push(loop_[(e + j) % m].clone());
@@ -1162,6 +1224,32 @@ mod tests {
             "the curved side should be recovered as an arc, got {boundary:?}"
         );
         assert!(region_contains(&boundary, &[], 0.0, -2.0));
+    }
+
+    #[test]
+    fn closed_loop_cut_by_open_line_uses_subface() {
+        // A circle crossed by a chord: picking in one segment must fill only
+        // that segment, not the whole circle. The chord is an open line, which
+        // the closed-loop fast path used to ignore entirely.
+        let mut doc = Document::new();
+        doc.add(full_circle(0.0, 0.0, 5.0));
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pti(-5, 3),
+            pti(5, 3),
+        ))));
+        // Click in the small cap above the chord (y in 3..5).
+        let (boundary, holes) =
+            trace_pick_region(&doc, 0.0, 4.0).expect("the cap encloses the click");
+        assert!(holes.is_empty());
+        assert!(region_contains(&boundary, &[], 0.0, 4.0), "cap is filled");
+        assert!(
+            !region_contains(&boundary, &[], 0.0, 0.0),
+            "the circle center (below the chord) must NOT be in the picked cap"
+        );
+        assert!(
+            boundary.iter().any(|c| matches!(c, Curve::Arc(_))),
+            "the curved side of the cap is a real arc, got {boundary:?}"
+        );
     }
 
     #[test]
