@@ -86,6 +86,42 @@ fn poly_uniform_max_size(group: &[CornerGeom], kind: CornerKind) -> f64 {
     (cap * 0.98).max(1e-3)
 }
 
+/// Uniform cap for filleting/chamfering several separate lines at once (e.g. the
+/// three sides of a triangle). Besides each corner's own limit, a line shared by
+/// two corners must hold both tangents (or both chamfer cuts) from its two ends:
+/// t₁ + t₂ ≤ length. Without this the combined trims overrun the line and mangle
+/// it. Mirrors `poly_uniform_max_size` for the non-poly case.
+fn line_group_max_size(group: &[CornerGeom], kind: CornerKind) -> f64 {
+    use std::collections::HashMap;
+    let mut cap = group
+        .iter()
+        .map(|c| c.max_size(kind))
+        .fold(f64::INFINITY, f64::min);
+
+    // Per-entity tangent/cut budget consumed at each corner that uses it.
+    // factor is what one unit of size costs along that edge.
+    let factor = |c: &CornerGeom| match kind {
+        CornerKind::Chamfer => 1.0,
+        CornerKind::Fillet => 1.0 / (c.interior_angle() * 0.5).tan(),
+    };
+    let mut uses: HashMap<EntityId, Vec<(f64, f64)>> = HashMap::new();
+    for c in group {
+        uses.entry(c.a).or_default().push((c.len_a, factor(c)));
+        uses.entry(c.b).or_default().push((c.len_b, factor(c)));
+    }
+    for budget in uses.values() {
+        if budget.len() < 2 {
+            continue;
+        }
+        let l = budget.iter().map(|u| u.0).fold(f64::INFINITY, f64::min);
+        let sum: f64 = budget.iter().map(|u| u.1).sum();
+        if sum > 1e-9 {
+            cap = cap.min(l / sum);
+        }
+    }
+    (cap * 0.98).max(1e-3)
+}
+
 type Pt = (f64, f64);
 
 pub fn fillet_arc(corner: Pt, da: Pt, db: Pt, r: f64) -> Option<(Pt, Pt, Pt)> {
@@ -339,10 +375,7 @@ impl AppState {
         if geom.poly_seg.is_some() {
             poly_uniform_max_size(&group, kind)
         } else {
-            group
-                .iter()
-                .map(|c| c.max_size(kind))
-                .fold(f64::INFINITY, f64::min)
+            line_group_max_size(&group, kind)
         }
     }
 

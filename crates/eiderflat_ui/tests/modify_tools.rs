@@ -99,6 +99,66 @@ fn fillet_tool_adds_arc() {
 }
 
 #[test]
+fn fillet_triangle_caps_radius_across_shared_edges() {
+    use eiderflat_ui::state::CornerKind;
+    use std::collections::HashMap;
+
+    // Three separate lines forming a right triangle. Each side is shared by two
+    // corners, so the uniform fillet radius must be small enough that both
+    // tangents fit on every side. Without that the trims overrun and mangle the
+    // sides (lines shoot far past the triangle).
+    let mut a = app();
+    let i1 = a.add_entity(line(0, 0, 10, 0));
+    let i2 = a.add_entity(line(10, 0, 0, 10));
+    let i3 = a.add_entity(line(0, 10, 0, 0));
+    a.selection = vec![i1, i2, i3];
+
+    let corners = a.detect_corners();
+    assert_eq!(corners.len(), 3, "triangle has three corners");
+
+    let cap = a.corner_group_cap(&corners[0], CornerKind::Fillet);
+
+    // Sum the tangent lengths each corner consumes on every edge it touches.
+    let mut budget: HashMap<_, (f64, f64)> = HashMap::new();
+    for c in &corners {
+        let t = cap / (c.interior_angle() * 0.5).tan();
+        for (id, len) in [(c.a, c.len_a), (c.b, c.len_b)] {
+            let e = budget.entry(id).or_insert((0.0, f64::INFINITY));
+            e.0 += t;
+            e.1 = e.1.min(len);
+        }
+    }
+    for (sum_t, len) in budget.values() {
+        assert!(
+            *sum_t <= *len + 1e-6,
+            "fillet tangents {sum_t:.3} overrun a shared edge of length {len:.3}"
+        );
+    }
+
+    // End to end: a huge requested radius is clamped, yielding one arc per
+    // corner with every endpoint still inside the triangle's bounding box.
+    a.begin_corner_action(corners[0]);
+    a.set_corner_size(1e6);
+    a.apply_corner_action();
+    let arcs = a
+        .document
+        .iter()
+        .filter(|e| matches!(&e.kind, EntityKind::Curve(Curve::Arc(_))))
+        .count();
+    assert_eq!(arcs, 3, "one fillet arc per corner");
+    for e in a.document.iter() {
+        if let EntityKind::Curve(Curve::Line(l)) = &e.kind {
+            for p in [l.p0.to_f64(), l.p1.to_f64()] {
+                assert!(
+                    p.0 > -0.5 && p.0 < 10.5 && p.1 > -0.5 && p.1 < 10.5,
+                    "line endpoint {p:?} escaped the triangle"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn rotate_tool_turns_selection() {
     let mut a = app();
     let id = a.add_entity(line(1, 0, 2, 0));
