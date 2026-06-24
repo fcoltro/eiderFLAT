@@ -208,7 +208,12 @@ pub fn triangulate_with_tol(
     holes: &[Vec<Curve>],
     tol: f64,
 ) -> Vec<[Point2d; 3]> {
-    let floor = (region_diag(boundary) * 2e-5).max(1e-7);
+    // Lower bound on the flatten tolerance, relative to the region size, so a
+    // huge boundary can't request an unbounded number of points. Kept small
+    // enough (~1/5,000,000 of the region) that the fill edge stays sub-pixel
+    // even at extreme zoom; the deviation-based flattener naturally uses far
+    // fewer points at normal zoom.
+    let floor = (region_diag(boundary) * 1e-7).max(1e-9);
     let tol = tol.max(floor);
     let mut outer = loop_polygon(boundary, tol);
     if outer.len() < 3 {
@@ -239,7 +244,9 @@ pub fn triangulate_with_tol(
 /// polyline instead of re-flattening every boundary curve every frame, while
 /// still refining as you zoom in (smaller `tol`).
 pub fn outline_loops(boundary: &[Curve], holes: &[Vec<Curve>], tol: f64) -> Vec<Vec<Point2d>> {
-    let floor = (region_diag(boundary) * 2e-5).max(1e-7);
+    // Match the fill's lower bound (see `triangulate_with_tol`) so the stroked
+    // outline and the fill edge refine together as you zoom in.
+    let floor = (region_diag(boundary) * 1e-7).max(1e-9);
     let tol = tol.max(floor);
     let to_pts = |ring: Vec<P>| -> Vec<Point2d> {
         ring.into_iter()
