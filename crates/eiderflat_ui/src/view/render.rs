@@ -589,18 +589,34 @@ pub(super) fn draw_entity(
             font,
         } => {
             let (x, y) = anchor.to_f64();
-            let font = crate::fonts::text_font_id(
-                painter.ctx(),
-                font.as_deref(),
-                *height as f32 * app.view.zoom as f32,
-            );
+            // Rasterize glyphs at a quantized size (next power of two, capped)
+            // and scale the shape to the exact on-screen size. Tying the font's
+            // raster size directly to a continuously-changing zoom thrashes
+            // egui's font atlas — every new size forces a glyph re-raster and
+            // periodic full texture rebuilds — which is what made zooming over
+            // text stutter. Quantizing keeps it to a handful of cached sizes.
+            const MIN_PX: f32 = 8.0;
+            const MAX_PX: f32 = 512.0;
+            let target_px = (*height as f32 * app.view.zoom as f32).max(0.01);
+            let raster_px = 2f32
+                .powf(target_px.clamp(MIN_PX, MAX_PX).log2().ceil())
+                .clamp(MIN_PX, MAX_PX);
+            let scale = target_px / raster_px;
+            let font = crate::fonts::text_font_id(painter.ctx(), font.as_deref(), raster_px);
             let galley = painter.layout_no_wrap(content.clone(), font, stroke.color);
             let angle = -(*rotation as f32);
-            let h = galley.size().y;
+            let h = galley.size().y * scale;
             let (sn, cs) = angle.sin_cos();
             let pos = to_screen(x, y) + vec2(h * sn, -h * cs);
             let mut shape = egui::epaint::TextShape::new(pos, galley, stroke.color);
             shape.angle = angle;
+            if (scale - 1.0).abs() > 1e-3 {
+                // Scale glyphs about the anchor `pos` (keeps `pos` fixed).
+                shape.transform(egui::emath::TSTransform {
+                    scaling: scale,
+                    translation: pos.to_vec2() * (1.0 - scale),
+                });
+            }
             painter.add(shape);
         }
         EntityKind::Hatch {
