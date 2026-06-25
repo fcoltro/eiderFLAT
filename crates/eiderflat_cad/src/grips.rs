@@ -107,6 +107,12 @@ pub fn grips_for(kind: &EntityKind) -> Vec<Grip> {
                 Grip::new(GripRole::Rotation, rot),
             ]
         }
+        EntityKind::Dimension { p1, p2, line, .. } => vec![
+            Grip::new(GripRole::Endpoint(0), *p1),
+            Grip::new(GripRole::Endpoint(1), *p2),
+            // The offset handle that slides the dimension line.
+            Grip::new(GripRole::Vertex(2), *line),
+        ],
         _ => Vec::new(),
     }
 }
@@ -263,6 +269,16 @@ pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
                 rotation: r,
                 font: font.clone(),
             }
+        }
+
+        (EntityKind::Dimension { p2, line, height, .. }, GripRole::Endpoint(0)) => {
+            EntityKind::Dimension { p1: to, p2: *p2, line: *line, height: *height }
+        }
+        (EntityKind::Dimension { p1, line, height, .. }, GripRole::Endpoint(1)) => {
+            EntityKind::Dimension { p1: *p1, p2: to, line: *line, height: *height }
+        }
+        (EntityKind::Dimension { p1, p2, height, .. }, GripRole::Vertex(2)) => {
+            EntityKind::Dimension { p1: *p1, p2: *p2, line: to, height: *height }
         }
 
         _ => start.clone(),

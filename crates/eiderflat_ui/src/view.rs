@@ -1165,7 +1165,16 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             p2: Some(b),
         } = &app.tool
         {
-            draw_dimension(&painter, app, *a, *b, cursor, &to_screen, crate::theme::PREVIEW);
+            // Preview in the dimension layer's colour (green) so it reads as the
+            // dimension it will become, not a generic amber preview.
+            let dim_col = app
+                .document
+                .layers
+                .index_of(eiderflat_document::DIMENSION_LAYER)
+                .and_then(|i| app.document.layers.get(i))
+                .map(|l| Color32::from_rgb(l.color.0, l.color.1, l.color.2))
+                .unwrap_or(Color32::from_rgb(46, 204, 113));
+            draw_dimension(&painter, app, *a, *b, cursor, &to_screen, dim_col);
         }
         draw_transform_ghost(&painter, app, &to_screen);
         draw_trim_extend_preview(&painter, app, &to_screen);

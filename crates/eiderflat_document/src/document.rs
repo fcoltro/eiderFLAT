@@ -70,8 +70,8 @@ pub struct DimStyle {
 impl Default for DimStyle {
     fn default() -> Self {
         DimStyle {
-            text_height: 2.5,
-            arrow_size: 2.5,
+            text_height: 1.0,
+            arrow_size: 1.0,
             font: None,
         }
     }

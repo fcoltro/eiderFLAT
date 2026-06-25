@@ -24,8 +24,14 @@ pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
                     return Some(e.id);
                 }
             }
-            EntityKind::Text { .. } | EntityKind::Dimension { .. } => {
+            EntityKind::Text { .. } => {
                 return Some(e.id);
+            }
+            EntityKind::Dimension { p1, p2, line, .. } => {
+                let text_h = doc.settings.dim_style.text_height;
+                if dimension_hit(*p1, *p2, *line, x, y, tol, text_h) {
+                    return Some(e.id);
+                }
             }
             EntityKind::Hatch {
                 boundary, holes, ..
@@ -34,6 +40,61 @@ pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
         }
     }
     None
+}
+
+/// Distance from point `p` to segment `a`–`b`.
+fn point_seg_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len_sq = dx * dx + dy * dy;
+    let t = if len_sq < 1e-20 {
+        0.0
+    } else {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len_sq).clamp(0.0, 1.0)
+    };
+    let (fx, fy) = (a.0 + t * dx, a.1 + t * dy);
+    ((p.0 - fx).powi(2) + (p.1 - fy).powi(2)).sqrt()
+}
+
+/// Hit-test an aligned dimension: its extension lines, its dimension line, and
+/// the text region — not the empty interior of its bounding box.
+fn dimension_hit(
+    p1: Point2d,
+    p2: Point2d,
+    line: Point2d,
+    x: f64,
+    y: f64,
+    tol: f64,
+    text_h: f64,
+) -> bool {
+    let (x1, y1) = p1.to_f64();
+    let (x2, y2) = p2.to_f64();
+    let (lx, ly) = line.to_f64();
+    let (dx, dy) = (x2 - x1, y2 - y1);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-9 {
+        return false;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let t1 = (x1 - lx) * ux + (y1 - ly) * uy;
+    let t2 = (x2 - lx) * ux + (y2 - ly) * uy;
+    let d1 = (lx + t1 * ux, ly + t1 * uy);
+    let d2 = (lx + t2 * ux, ly + t2 * uy);
+    let p = (x, y);
+    // Extension lines and the dimension line.
+    if point_seg_dist(p, (x1, y1), d1) <= tol
+        || point_seg_dist(p, (x2, y2), d2) <= tol
+        || point_seg_dist(p, d1, d2) <= tol
+    {
+        return true;
+    }
+    // Text region: a disc around the text centre (just off the dimension line).
+    let mid = ((d1.0 + d2.0) * 0.5, (d1.1 + d2.1) * 0.5);
+    let (nx, ny) = (-uy, ux);
+    let gap = text_h * 0.5;
+    let tc = (mid.0 + nx * gap, mid.1 + ny * gap);
+    let r = text_h.max(tol);
+    ((x - tc.0).powi(2) + (y - tc.1).powi(2)).sqrt() <= r
+        || ((x - (mid.0 - nx * gap)).powi(2) + (y - (mid.1 - ny * gap)).powi(2)).sqrt() <= r
 }
 
 pub fn select_window(doc: &Document, rect: &BoundingBox) -> Vec<EntityId> {
@@ -138,6 +199,24 @@ mod tests {
         let a = doc.add(line(1, 1, 3, 3));
         let b = doc.add(line(4, 4, 8, 8));
         (doc, a, b)
+    }
+
+    #[test]
+    fn dimension_picks_on_lines_not_interior() {
+        let mut doc = Document::new();
+        // Horizontal dimension: p1=(0,0), p2=(10,0), line offset up at y=4.
+        let id = doc.add(EntityKind::Dimension {
+            p1: pt(0, 0),
+            p2: pt(10, 0),
+            line: pt(0, 4),
+            height: 1.0,
+        });
+        // On the dimension line (y≈4) → hit.
+        assert_eq!(pick_at(&doc, 5.0, 4.0, 0.2), Some(id));
+        // On an extension line (x≈0, between y=0 and y=4) → hit.
+        assert_eq!(pick_at(&doc, 0.0, 2.0, 0.2), Some(id));
+        // In the empty interior (between the extension lines, off both rules).
+        assert_eq!(pick_at(&doc, 5.0, 2.0, 0.2), None);
     }
 
     #[test]
