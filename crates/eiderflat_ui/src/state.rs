@@ -217,7 +217,7 @@ pub enum BboxHandle {
 fn seed_default_layers(doc: &mut eiderflat_document::Document) {
     use eiderflat_document::Layer;
     for layer in [
-        Layer::new("Dimensions").with_color(245, 185, 74),
+        Layer::new("Dimensions").with_color(46, 204, 113),
         Layer::new("Centerlines").with_color(232, 134, 108),
         Layer::new("Construction").with_color(169, 140, 255),
         Layer::new("Hidden").with_color(150, 160, 178),

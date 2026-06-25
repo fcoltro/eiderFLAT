@@ -1123,18 +1123,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 painter.rect_stroke(rect, 0.0, Stroke::new(1.0, line), egui::StrokeKind::Middle);
             }
         }
-        if let Some(((rx, ry), angle_rad)) = app.interaction.active_guide {
-            let view_diag =
-                (app.view.width * app.view.width + app.view.height * app.view.height).sqrt();
-            let world_length = view_diag * app.view.pixel_world_size() * 2.0;
-            let p_start = to_screen(rx, ry);
-            let p_end = to_screen(
-                rx + world_length * angle_rad.cos(),
-                ry + world_length * angle_rad.sin(),
-            );
-            let guide_stroke = Stroke::new(1.0, crate::theme::SNAP);
-            draw_dashed_line(&painter, p_start, p_end, guide_stroke, 6.0, 6.0);
-        }
         if !app.interaction.active_guides.is_empty() {
             // Draw each guide as a ray from its source point (a line's endpoint,
             // a tracked feature, or the reference point) through the locked
@@ -1202,6 +1190,21 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             let cross = Stroke::new(1.0, Color32::from_rgb(140, 150, 170));
             painter.line_segment([pos2(rect.left(), cc.y), pos2(rect.right(), cc.y)], cross);
             painter.line_segment([pos2(cc.x, rect.top()), pos2(cc.x, rect.bottom())], cross);
+            // The polar/ortho guide is drawn after the crosshair so a horizontal
+            // or vertical guide isn't painted over by it (the crosshair shares
+            // those exact pixels; diagonal guides like 45° never collided).
+            if let Some(((rx, ry), angle_rad)) = app.interaction.active_guide {
+                let view_diag =
+                    (app.view.width * app.view.width + app.view.height * app.view.height).sqrt();
+                let world_length = view_diag * app.view.pixel_world_size() * 2.0;
+                let p_start = to_screen(rx, ry);
+                let p_end = to_screen(
+                    rx + world_length * angle_rad.cos(),
+                    ry + world_length * angle_rad.sin(),
+                );
+                let guide_stroke = Stroke::new(1.5, crate::theme::SNAP);
+                draw_dashed_line(&painter, p_start, p_end, guide_stroke, 6.0, 6.0);
+            }
             if matches!(app.tool, Tool::Select) || app.tool.picks_entities() {
                 let box_stroke = if matches!(app.tool, Tool::Select) {
                     cross
