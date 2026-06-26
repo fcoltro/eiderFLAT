@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/fcoltro/eiderFLAT/actions/workflows/release.yml"><img src="https://github.com/fcoltro/eiderFLAT/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
   <a href="https://github.com/fcoltro/eiderFLAT/releases/latest"><img src="https://img.shields.io/github/v/release/fcoltro/eiderFLAT?include_prereleases&label=download" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/rust-2021-orange.svg" alt="Rust 2021">
+  <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust 2024">
   <img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="GPL-3.0-or-later">
   <img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20Linux%20%C2%B7%20macOS-555" alt="Platforms">
 </p>
@@ -21,16 +21,17 @@
 **eiderFLAT** is a 2D CAD drafting environment built entirely from the ground up in
 Rust — no CAD engine dependencies, no port of an existing kernel. It pairs the
 precision of a real geometry core with the feel of a modern app: a deep,
-glass-panelled dark UI, a ⌘K command palette, live snapping, and CAD-style grips
-on everything you draw.
+glass-panelled dark UI, a `Ctrl+F` command palette, live object snapping, and
+CAD-style grips on everything you draw.
 
 The kernel works in **f64 coordinates with tolerance-based predicates**. Lines,
-circular arcs, elliptical arcs, cubic Béziers, polycurves and clamped-cubic
-**NURBS** are first-class primitives. Intersections, offsets, distances, curvature
-and planar booleans are computed numerically, with **Shewchuk-exact orientation
-predicates** keeping boolean winding robust even on near-degenerate input. The
-viewport renders through the egui painter with **adaptive, zoom-aware
-tessellation** — smooth curves at any zoom, exact where it matters.
+circular arcs, elliptical arcs, cubic Béziers, polycurves, rational Béziers and
+clamped-cubic **NURBS** are first-class primitives. Intersections, offsets,
+distances, curvature and planar booleans are computed numerically, with
+**Shewchuk-exact orientation predicates** keeping boolean winding robust even on
+near-degenerate input. The viewport renders through the egui painter with
+**adaptive, zoom-aware tessellation** and **viewport culling** — smooth curves at
+any zoom, only what's on screen is drawn.
 
 ## ⬇ Download
 
@@ -43,81 +44,108 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 
 ## ✨ Features
 
-### Drawing
-- **Line, Polyline, Circle, Arc** (3-point), **Ellipse, Rectangle, Polygon** (n-sided)
-- **NURBS spline** with control-vertex authoring — draggable CV grips and per-vertex weights
-- **Text** (single- and multi-line) rendered with a user-selectable on-canvas font (TTF/OTF)
+### Draw
+- **Line** and **Polyline**
+- **Circle** — center+radius, 2-point (diameter), 3-point, tangent-tangent-radius (TTR), tangent-tangent-tangent (TTT)
+- **Arc** — 3-point, start-center-end, center-start-end
+- **Tangent line** — from a point or common to two circles/arcs
+- **Ellipse** (center + two axes), **Rectangle**, **Polygon** (n-sided, type the count)
+- **NURBS spline** — control-vertex authoring with draggable CV grips and per-vertex weights
+- **Text** with a user-selectable on-canvas font (TTF/OTF), drawn as filled vector outlines; multi-line supported
 
-### Modifying
+### Modify
 - **Move, Copy, Rotate, Scale, Mirror, Stretch**
 - **Cut / Copy / Paste** (`Ctrl+X / C / V`) — paste lands at the cursor
 - **Offset** — segment-mitred for polylines/polygons, exact for NURBS
 - **Trim & Extend** — span-aware and spline-preserving
-- **Fillet & Chamfer** on lines and polyline corners
-- **Disjoint** (explode) / **Join**, and **Hatch** — region-based solid fill with islands
-- CAD-style **grips** on every selected entity — drag to reshape, or type exact values
+- **Fillet & Chamfer** — on two lines or around polyline corners
+- **Disjoint** (explode) and **Join**
+- **Hatch** — region-based fill (solid, line, cross-hatch or dot patterns) with island detection
+- CAD-style **grips** on every selected entity — drag to reshape, or type an exact value
 - Contextual corner fillet/chamfer dots and bounding-box transform handles
 - A floating **contextual toolbar** (duplicate, mirror, rotate, offset, delete) above the selection — follows multi-selections too
 
-### Dimensioning
+### Dimensions
 - **Linear / Aligned** — distance between two points, parallel to the measured span
 - **Horizontal / Vertical** — axis-locked linear dimensions
-- **Angular** — from three points (vertex + two sides) or from two picked lines
-- **Radius & Diameter** — pick a circle or arc, then aim the leader (`R` / `⌀`)
-- **Text override** per dimension, and a drawing-wide **decimal-precision** setting
-- Dimensions export to DXF and SVG as ordinary geometry + text
+- **Angular** — from three points (vertex + a point on each side) or from two picked lines
+- **Radius / Diameter** — pick a circle or arc, then aim the leader (`R` / `⌀`)
+- Per-dimension **text override**, and a drawing-wide **decimal-precision** setting
+- One shared dimension style (text height, arrow size, font, precision); dimensions land on an auto-created **Dimensions** layer
+
+### Snapping & input
+- **Object snaps** — Endpoint, Midpoint, Center, Quadrant, Intersection, Perpendicular, Tangent, Nearest, Node, Insertion (each individually toggleable, with on-canvas markers + labels)
+- **Grid** and **grid snap**, **polar / angle guides**, and **extension tracking**
+- **Dynamic input HUD** — type a length/angle, radius, width×height or side count right at the cursor; sizes grow in the direction you aim (no negative numbers needed)
+- **Coordinate entry** — `x,y` absolute, `@dx,dy` relative, `d<a` polar absolute, `@d<a` polar relative (degrees)
+- A translucent **tool-hint panel** (bottom-right) listing the active tool's keys, with getting-started tips on a blank canvas
+- **Cursor readout** for move/copy/rotate/scale, and a live **scale bar**
 
 ### Workspace & UI
-- **Layers** with colour, show/hide, rename and current-layer — seeded with a sensible default set
-- Editable **Properties inspector**: geometry, measurements, line weight, line type and layer
-- **Object snapping** — Endpoint, Midpoint, Center, Quadrant, Intersection, Perpendicular, Tangent, Nearest, Node, Insertion
-- Grid + grid snap, **polar / angle guides**, and a **dynamic input HUD** (type a size in the direction you aim — no negative numbers)
-- Window / crossing marquee, hover highlight, and ghost previews for transforms
-- **⌘K / Ctrl+K command palette** plus an always-available command line
-- A translucent **tool-hint panel** showing the active tool's keys (and getting-started tips on a blank canvas)
-- **Drawing units** (mm / cm / m / km / in / ft / unitless) that bound the zoom range
-- Viewport-culled rendering, so large drawings stay smooth
-- Modern dark, glass-panelled interface — top bar, two-column tool dock (draw + modify), inspector, status pill
+- **Layers** — colour, show/hide, freeze, lock, rename, set-current, per-layer line type & weight; seeded with a sensible default set
+- Editable **Properties inspector** — geometry, live measurements, colour, line weight, line type and layer; hatch-pattern editor; dimension text override
+- **Line types** (Continuous, Dashed, Dotted, Center, or custom dash patterns) and **line weights** shown at a fixed on-screen scale
+- **Drawing units** — mm / cm / m / km / in / ft / unitless — that bound the zoom range and label measurements
+- **Curvature comb** on selected curves for smoothness inspection
+- **`Ctrl+F` command palette** plus an always-available command line, **window / crossing marquee**, hover highlight, ghost previews, **undo / redo**
+- Modern dark, glass-panelled interface — top bar, two-column tool dock (draw + modify), inspector and status pill; preferences persist between sessions
 
 ### Geometry kernel
+- Curve primitives: line, circular arc, elliptical arc, cubic Bézier, rational Bézier, polycurve, clamped-cubic **NURBS**
+- Numeric **intersect / distance / curvature / offset / split / reverse**; tangent solvers (3-point circle, TTR, TTT, tangent lines)
 - Exact **boolean region** ops (union / intersection / difference / xor) via Greiner–Hormann clipping with robust winding
-- **Shewchuk-exact** orientation predicates
-- Adaptive **quadtree + Morton-code** spatial index for fast picking and queries
-- Numeric intersect / distance / curvature / offset / split-reverse operations
+- **Shewchuk-exact** orientation predicates (via the `robust` crate)
 - Affine **transforms** (translate, rotate, scale, mirror) with reflection-correct arcs
+- Shared numeric utilities (angle normalisation, point/segment distance) reused across every crate — 100% safe Rust (`unsafe` is forbidden workspace-wide)
 
 ### Interoperability
-- Native **`.e2d`** format (lossless)
-- **DXF** (ASCII) import & export
-- **SVG** import & export
+- Native **`.e2d`** format — lossless, atomic saves
+- **DXF** (ASCII) — import & export
+- **SVG** — import & export
+- Dimensions export to DXF/SVG as ordinary lines + text (so they render anywhere)
 
 ## ⌨ Commands
 
-Type a word in the command line (or use the toolbars / palette). Common aliases:
+Type a verb in the command line, or use the toolbars / `Ctrl+F` palette. Common aliases:
 
 | Draw | | Modify | | Other | |
 |------|--|--------|--|-------|--|
 | `LINE` / `L` | Line | `MOVE` / `M` | Move | `SELECT` / `SE` | Select |
-| `POLYLINE` / `PL` | Polyline | `COPY` / `CO` | Copy | `ERASE` / `E` / `DEL` | Delete |
-| `CIRCLE` / `C` | Circle | `ROTATE` / `RO` | Rotate | `DISJOINT` / `X` | Disjoint (explode) |
-| `ARC` / `A` | Arc (3-pt) | `SCALE` / `SC` | Scale | `JOIN` / `J` | Join |
-| `ELLIPSE` / `EL` | Ellipse | `MIRROR` / `MI` | Mirror | `HATCH` / `H` | Hatch |
-| `RECTANGLE` / `REC` | Rectangle | `OFFSET` / `O` | Offset | `UNDO` / `U` | Undo |
-| `POLYGON` / `POL` | Polygon | `TRIM` / `TR` | Trim | `REDO` | Redo |
-| `SPLINE` / `SPL` | NURBS spline | `EXTEND` / `EX` | Extend | `ALL` | Select all |
-| `TEXT` / `T` / `MTEXT` | Text | `FILLET` / `F` | Fillet | `ZOOM` / `Z` | Zoom |
-| `DIMENSION` / `DIM` | Dimension (aligned) | `CHAMFER` / `CHA` | Chamfer | `LAYER` / `LA` | Layers |
-| `DIMHOR` / `DIMVER` | Horizontal / Vertical dim | `STRETCH` / `S` | Stretch | | |
-| `DIMANG` / `DIMANGL` | Angular (3-pt / 2-line) | | | | |
-| `DIMRAD` / `DIMDIA` | Radius / Diameter | | | | |
+| `POLYLINE` / `PL` | Polyline | `COPY` / `CO` | Copy | `ERASE` / `E` / `DELETE` | Delete |
+| `CIRCLE` / `C` | Circle (center, radius) | `ROTATE` / `RO` | Rotate | `DISJOINT` / `X` | Disjoint (explode) |
+| `CIRCLE2P` / `C2P` | Circle (2 points) | `SCALE` / `SC` | Scale | `JOIN` / `J` | Join |
+| `CIRCLE3P` / `C3P` | Circle (3 points) | `MIRROR` / `MI` | Mirror | `HATCH` / `H` | Hatch |
+| `TTR` · `TTT` | Tangent circles | `OFFSET` / `O` | Offset | `UNDO` / `U` | Undo |
+| `ARC` / `A` | Arc (3-point) | `TRIM` / `TR` | Trim | `REDO` | Redo |
+| `ARCSCE` · `ARCCSE` | Arc (SCE / CSE) | `EXTEND` / `EX` | Extend | `ALL` | Select all |
+| `TANGENT` / `TAN` | Tangent line | `FILLET` / `F` | Fillet | `ZOOM` / `Z` | Zoom / extents |
+| `ELLIPSE` / `EL` | Ellipse | `CHAMFER` / `CHA` | Chamfer | `LAYER` / `LA` | Layer set / new |
+| `RECTANGLE` / `REC` | Rectangle | `STRETCH` / `S` | Stretch | | |
+| `POLYGON` / `POL` | Polygon | **Dimension** | | | |
+| `SPLINE` / `SPL` | NURBS spline | `DIMENSION` / `DIM` | Aligned | | |
+| `TEXT` / `T` / `MTEXT` | Text | `DIMHOR` · `DIMVER` | Horizontal / Vertical | | |
+| | | `DIMANG` · `DIMANGL` | Angular (3-pt / 2-line) | | |
+| | | `DIMRAD` · `DIMDIA` | Radius / Diameter | | |
 
-Coordinate entry supports `x,y` (absolute), `@dx,dy` (relative), `d<a` (polar
-absolute) and `@d<a` (polar relative, degrees). Clipboard: `Ctrl+X` cut,
-`Ctrl+C` copy, `Ctrl+V` paste at the cursor.
+`POLYGON n` and `TTR r` accept an inline argument (side count / radius). Polyline
+and spline finish with **Enter** or right-click, and close with **C**.
+
+### Keyboard shortcuts
+
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| `L P C E A R G S T H` | Line / Polyline / Circle / Ellipse / Arc / Rectangle / polyGon / Spline / Text / Hatch | `Ctrl+N O S` | New / Open / Save |
+| `Shift+ M C R S A I` | Move / Copy / Rotate / Stretch / scAle / mIrror | `Ctrl+Shift+S` | Save As |
+| `Shift+ O T E F H` | Offset / Trim / Extend / Fillet / cHamfer | `Ctrl+Z` · `Ctrl+Y` | Undo / Redo |
+| `Shift+ X J` | disjoint (eXplode) / Join | `Ctrl+X C V` | Cut / Copy / Paste |
+| `Esc` | Cancel / deselect | `Ctrl+A` | Select all |
+| `Z` | Zoom extents | `Ctrl+F` | Command palette |
+| `Space` | Repeat last command | `Del` | Delete selection |
+| `F7`–`F12` | Toggle object snap · grid · grid snap · polar · tracking · dynamic input | | |
 
 ## 🔨 Build & run
 
-Plain Cargo, no special toolchain — just a Rust toolchain (stable).
+Plain Cargo, no special toolchain — just a stable Rust toolchain.
 
 ```sh
 cargo build --workspace
@@ -133,17 +161,19 @@ cargo run -p eiderflat_app -- demo  # headless geometry-kernel demo
 ## 🧱 Architecture
 
 eiderFLAT is a Cargo **workspace** — the kernel is fully decoupled from the UI, so
-every crate below `eiderflat_ui` is headless and independently testable.
+every crate below `eiderflat_ui` is headless and independently testable. Shared
+package metadata, dependency versions and lints are defined once at the workspace
+root and inherited by every crate.
 
 | Crate | Responsibility |
 |-------|----------------|
-| `eiderflat_geometry` | Curve primitives (line, arc, ellipse, cubic, polycurve, NURBS), transforms, ops (intersect / distance / curvature / offset / split), and shared numeric utilities (angle / point-segment helpers) reused across every crate |
-| `eiderflat_spatial` | Adaptive quadtree + Morton-code spatial index |
+| `eiderflat_geometry` | Curve primitives (line, arc, ellipse, cubic, rational, polycurve, NURBS), transforms, ops (intersect / distance / curvature / offset / split / tangent), and shared numeric utilities (angle / point-segment helpers) reused across every crate |
+| `eiderflat_spatial` | Adaptive quadtree + Morton-code spatial index (standalone; reserved for upcoming query acceleration / 3D — picking currently uses bounding-box-filtered scans) |
 | `eiderflat_boolean` | Planar region boolean ops (union / intersection / difference / xor) with robust winding |
-| `eiderflat_document` | Document / layer / entity / block model, plus the shared dimension geometry + labelling used by both the renderer and exporters |
-| `eiderflat_cad` | Snapping, selection, grips, draw + edit (trim / extend / fillet / chamfer / offset / hatch / …) |
+| `eiderflat_document` | Document / layer / entity / block model, plus the shared dimension geometry + labelling used by both the renderer and the exporters |
+| `eiderflat_cad` | Snapping, selection, grips, draw + edit (trim / extend / fillet / chamfer / offset / hatch / join / explode / inquiry) |
 | `eiderflat_io` | DXF, SVG and native `.e2d` import / export |
-| `eiderflat_ui` | Headless app state + egui view (toolbars, canvas, panels, command palette) |
+| `eiderflat_ui` | Headless app state + egui view (toolbars, canvas, panels, command palette, dialogs) |
 | `apps/eiderflat_app` | eframe GUI host + headless kernel demo |
 
 > The `eiderflat_*` crate prefix and the `.e2d` format magic are internal
