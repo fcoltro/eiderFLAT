@@ -59,7 +59,12 @@ pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::
         Tool::Move { base: Some(b), .. } | Tool::Copy { base: Some(b), .. } => {
             let (bx, by) = b.to_f64();
             let (dx, dy) = (cx - bx, cy - by);
-            Some(format!("Δ {:.2}, {:.2}   {:.2}", dx, dy, (dx * dx + dy * dy).sqrt()))
+            Some(format!(
+                "Δ {:.2}, {:.2}   {:.2}",
+                dx,
+                dy,
+                (dx * dx + dy * dy).sqrt()
+            ))
         }
         Tool::Rotate { base: Some(b), .. } => {
             let (bx, by) = b.to_f64();
@@ -83,7 +88,10 @@ pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::
     let Some(text) = text else { return };
 
     let cur = app.view.world_to_screen(cx, cy);
-    let pos = pos2(origin.x + cur.0 as f32 + 18.0, origin.y + cur.1 as f32 + 16.0);
+    let pos = pos2(
+        origin.x + cur.0 as f32 + 18.0,
+        origin.y + cur.1 as f32 + 16.0,
+    );
     egui::Area::new(egui::Id::new("cursor_readout"))
         .fixed_pos(pos)
         .order(egui::Order::Foreground)

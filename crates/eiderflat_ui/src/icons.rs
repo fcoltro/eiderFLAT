@@ -415,11 +415,7 @@ fn rich_tooltip(ui: &mut Ui, text: &str) {
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 7.0;
-        ui.label(
-            egui::RichText::new(head)
-                .strong()
-                .color(crate::theme::TEXT),
-        );
+        ui.label(egui::RichText::new(head).strong().color(crate::theme::TEXT));
         if let Some(k) = keys.filter(|k| !k.is_empty()) {
             let galley = ui.painter().layout_no_wrap(
                 k.clone(),

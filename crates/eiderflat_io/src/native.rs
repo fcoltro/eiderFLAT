@@ -957,9 +957,9 @@ mod tests {
         });
         let doc2 = from_string(&to_string(&doc)).unwrap();
         assert_eq!(doc2.len(), 2);
-        let ang = doc2
-            .iter()
-            .any(|e| matches!(&e.kind, EntityKind::AngularDim { center, .. } if *center == pt_i(0, 0)));
+        let ang = doc2.iter().any(
+            |e| matches!(&e.kind, EntityKind::AngularDim { center, .. } if *center == pt_i(0, 0)),
+        );
         let rad = doc2.iter().any(
             |e| matches!(&e.kind, EntityKind::RadialDim { diameter, edge, .. } if *diameter && *edge == pt_i(8, 4)),
         );
@@ -982,7 +982,11 @@ mod tests {
             EntityKind::Dimension { override_text, .. } => override_text.clone(),
             _ => None,
         });
-        assert_eq!(ovr.as_deref(), Some("≈ 10 cm"), "override text survives with spaces");
+        assert_eq!(
+            ovr.as_deref(),
+            Some("≈ 10 cm"),
+            "override text survives with spaces"
+        );
     }
 
     #[test]
@@ -1132,13 +1136,19 @@ mod tests {
     fn corrupt_counts_do_not_hang_or_oom() {
         // A control-point count far larger than the data present must not trigger a
         // huge allocation or spin: parsing stops at the end of the available tokens.
-        let nurbs = format!("{} {}\nE NURBS 0 bylayer 100000000 0;0 1 5;5 1\n", MAGIC, VERSION);
+        let nurbs = format!(
+            "{} {}\nE NURBS 0 bylayer 100000000 0;0 1 5;5 1\n",
+            MAGIC, VERSION
+        );
         let doc = from_string(&nurbs).expect("loads without hanging");
         assert_eq!(doc.len(), 1);
 
         // A POLY/HATCH segment count larger than the lines present must likewise
         // stop at end-of-input rather than looping the full declared count.
-        let poly = format!("{} {}\nE POLY 0 bylayer 100000000\nSEG LINE 0;0 4;0\n", MAGIC, VERSION);
+        let poly = format!(
+            "{} {}\nE POLY 0 bylayer 100000000\nSEG LINE 0;0 4;0\n",
+            MAGIC, VERSION
+        );
         let doc = from_string(&poly).expect("loads without hanging");
         assert_eq!(doc.len(), 1);
     }

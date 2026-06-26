@@ -146,7 +146,11 @@ impl Entity {
                 Some(bbox_of(&[p1.to_f64(), p2.to_f64(), line.to_f64()]))
             }
             EntityKind::AngularDim {
-                center, p1, p2, line, ..
+                center,
+                p1,
+                p2,
+                line,
+                ..
             } => Some(bbox_of(&[
                 center.to_f64(),
                 p1.to_f64(),

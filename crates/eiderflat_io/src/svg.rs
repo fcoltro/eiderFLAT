@@ -35,11 +35,9 @@ pub fn export_svg(doc: &Document) -> String {
         if let Some(path) = entity_to_svg(&e.kind, &fx, &fy, &stroke) {
             s.push_str(&path);
             s.push('\n');
-        } else if let Some(prims) = crate::dim::dimension_primitives(
-            &e.kind,
-            &doc.settings.dim_style,
-            doc.settings.units,
-        ) {
+        } else if let Some(prims) =
+            crate::dim::dimension_primitives(&e.kind, &doc.settings.dim_style, doc.settings.units)
+        {
             s.push_str(&dimension_to_svg(&prims, &fx, &fy, &stroke));
         }
     }
@@ -70,7 +68,10 @@ fn dimension_to_svg(
         let (tx, ty) = (fx(t.anchor.x), fy(t.anchor.y));
         let transform = if t.rotation_deg.abs() > 1e-6 {
             // SVG y-axis points down, so the on-screen rotation negates.
-            format!(" transform=\"rotate({:.4} {:.6} {:.6})\"", -t.rotation_deg, tx, ty)
+            format!(
+                " transform=\"rotate({:.4} {:.6} {:.6})\"",
+                -t.rotation_deg, tx, ty
+            )
         } else {
             String::new()
         };

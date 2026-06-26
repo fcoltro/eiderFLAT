@@ -686,10 +686,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     ui.separator();
                 }
                 if ui
-                    .add_enabled(
-                        !app.clipboard.is_empty(),
-                        egui::Button::new("Paste"),
-                    )
+                    .add_enabled(!app.clipboard.is_empty(), egui::Button::new("Paste"))
                     .clicked()
                 {
                     app.clipboard_paste();

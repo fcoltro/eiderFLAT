@@ -347,11 +347,9 @@ pub fn export_dxf(doc: &Document) -> String {
             .get(e.layer)
             .map(|l| l.name.clone())
             .unwrap_or_else(|| "0".into());
-        if let Some(prims) = crate::dim::dimension_primitives(
-            &e.kind,
-            &doc.settings.dim_style,
-            doc.settings.units,
-        ) {
+        if let Some(prims) =
+            crate::dim::dimension_primitives(&e.kind, &doc.settings.dim_style, doc.settings.units)
+        {
             dimension_to_dxf(&mut w, &prims, &layer_name);
         } else {
             write_entity(&mut w, &e.kind, &layer_name);

@@ -62,8 +62,15 @@ pub fn measured_value(kind: &EntityKind) -> Option<f64> {
             }
         }
         EntityKind::AngularDim {
-            center, p1, p2, line, ..
-        } => angular_sweep(*center, *p1, *p2, *line).sweep.abs().to_degrees(),
+            center,
+            p1,
+            p2,
+            line,
+            ..
+        } => angular_sweep(*center, *p1, *p2, *line)
+            .sweep
+            .abs()
+            .to_degrees(),
         EntityKind::RadialDim {
             center,
             edge,

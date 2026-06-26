@@ -432,8 +432,7 @@ impl AppState {
                 let dist = (dx * dx + dy * dy).sqrt();
                 if self.polar_on && dist > 1e-4 {
                     let angle_rad = dy.atan2(dx);
-                    let angle_deg_wrapped =
-                        eiderflat_geometry::wrap_deg360(angle_rad.to_degrees());
+                    let angle_deg_wrapped = eiderflat_geometry::wrap_deg360(angle_rad.to_degrees());
                     let nearest_45 = (angle_deg_wrapped / 45.0).round() * 45.0;
                     let diff = (angle_deg_wrapped - nearest_45).abs();
                     let diff = diff.min(360.0 - diff);
@@ -1582,12 +1581,16 @@ mod tests {
         let mut a = app();
         a.snap_on = false;
         // Two lines meeting at the origin: along +X and along +Y.
-        a.document.add(EntityKind::Curve(Curve::Line(
-            LineSeg::from_endpoints(Point2d::from_f64(0.0, 0.0), Point2d::from_f64(10.0, 0.0)),
-        )));
-        a.document.add(EntityKind::Curve(Curve::Line(
-            LineSeg::from_endpoints(Point2d::from_f64(0.0, 0.0), Point2d::from_f64(0.0, 10.0)),
-        )));
+        a.document
+            .add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(0.0, 0.0),
+                Point2d::from_f64(10.0, 0.0),
+            ))));
+        a.document
+            .add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(0.0, 0.0),
+                Point2d::from_f64(0.0, 10.0),
+            ))));
         a.tool = crate::tools::Tool::DimAngularLines {
             a: None,
             geom: None,
@@ -1598,7 +1601,10 @@ mod tests {
         let (s2x, s2y) = a.view.world_to_screen(0.0, 5.0);
         a.canvas_click(s2x, s2y);
         assert!(
-            matches!(a.tool, crate::tools::Tool::DimAngularLines { geom: Some(_), .. }),
+            matches!(
+                a.tool,
+                crate::tools::Tool::DimAngularLines { geom: Some(_), .. }
+            ),
             "two line picks produced the angle geometry"
         );
         let (lx, ly) = a.view.world_to_screen(3.0, 3.0);
@@ -1611,7 +1617,10 @@ mod tests {
                 _ => None,
             })
             .expect("an angular dimension");
-        assert!(dim.dist_f64(&Point2d::from_f64(0.0, 0.0)) < 1e-6, "vertex at intersection");
+        assert!(
+            dim.dist_f64(&Point2d::from_f64(0.0, 0.0)) < 1e-6,
+            "vertex at intersection"
+        );
     }
 
     #[test]

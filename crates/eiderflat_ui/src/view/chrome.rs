@@ -370,20 +370,14 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         ui.separator();
         let has_sel = app.has_selection();
         if ui
-            .add_enabled(
-                has_sel,
-                egui::Button::new("Cut").shortcut_text("Ctrl+X"),
-            )
+            .add_enabled(has_sel, egui::Button::new("Cut").shortcut_text("Ctrl+X"))
             .clicked()
         {
             app.clipboard_cut();
             ui.close();
         }
         if ui
-            .add_enabled(
-                has_sel,
-                egui::Button::new("Copy").shortcut_text("Ctrl+C"),
-            )
+            .add_enabled(has_sel, egui::Button::new("Copy").shortcut_text("Ctrl+C"))
             .clicked()
         {
             app.clipboard_copy();
@@ -567,7 +561,12 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
                     p2: None,
                 },
             );
-            tool_menu_item(ui, app, "Angular (3 points)", Tool::DimAngular { pts: vec![] });
+            tool_menu_item(
+                ui,
+                app,
+                "Angular (3 points)",
+                Tool::DimAngular { pts: vec![] },
+            );
             tool_menu_item(
                 ui,
                 app,
@@ -2277,9 +2276,9 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
 /// Draw a small rounded "keycap" chip holding a key label (e.g. `Esc`, `Ctrl+V`).
 fn keycap(ui: &mut egui::Ui, label: &str) {
     let font = egui::FontId::monospace(11.0);
-    let galley =
-        ui.painter()
-            .layout_no_wrap(label.to_string(), font.clone(), crate::theme::TEXT);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), font.clone(), crate::theme::TEXT);
     let pad = egui::vec2(6.0, 2.5);
     let size = galley.size() + pad * 2.0;
     // Fixed-width key column so the descriptions line up across rows.
@@ -2294,7 +2293,8 @@ fn keycap(ui: &mut egui::Ui, label: &str) {
         egui::Stroke::new(1.0, crate::theme::OUTLINE),
         egui::StrokeKind::Inside,
     );
-    ui.painter().galley(chip.min + pad, galley, crate::theme::TEXT);
+    ui.painter()
+        .galley(chip.min + pad, galley, crate::theme::TEXT);
 }
 
 /// The hint title and key/gesture rows for the current tool.
@@ -2394,7 +2394,11 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
         ),
         Text { .. } => (
             "Text",
-            vec![("Click", "anchor point"), ("Enter", "place"), ("Esc", "cancel")],
+            vec![
+                ("Click", "anchor point"),
+                ("Enter", "place"),
+                ("Esc", "cancel"),
+            ],
         ),
         Move { .. } | Copy { .. } => (
             "Move / Copy",
@@ -2406,11 +2410,19 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
         ),
         Rotate { .. } => (
             "Rotate",
-            vec![("Click", "base, then angle"), ("type", "angle°"), ("Esc", "cancel")],
+            vec![
+                ("Click", "base, then angle"),
+                ("type", "angle°"),
+                ("Esc", "cancel"),
+            ],
         ),
         Scale { .. } => (
             "Scale",
-            vec![("Click", "base, then factor"), ("type", "factor"), ("Esc", "cancel")],
+            vec![
+                ("Click", "base, then factor"),
+                ("type", "factor"),
+                ("Esc", "cancel"),
+            ],
         ),
         Mirror { .. } => (
             "Mirror",
@@ -2425,14 +2437,25 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
             ],
         ),
         Trim => ("Trim", vec![("Click", "piece to cut"), ("Esc", "finish")]),
-        Extend => ("Extend", vec![("Click", "end to lengthen"), ("Esc", "finish")]),
+        Extend => (
+            "Extend",
+            vec![("Click", "end to lengthen"), ("Esc", "finish")],
+        ),
         Fillet { .. } => (
             "Fillet",
-            vec![("type", "radius"), ("Click", "two lines"), ("Esc", "cancel")],
+            vec![
+                ("type", "radius"),
+                ("Click", "two lines"),
+                ("Esc", "cancel"),
+            ],
         ),
         Chamfer { .. } => (
             "Chamfer",
-            vec![("type", "distance"), ("Click", "two lines"), ("Esc", "cancel")],
+            vec![
+                ("type", "distance"),
+                ("Click", "two lines"),
+                ("Esc", "cancel"),
+            ],
         ),
         Stretch { .. } => (
             "Stretch",
@@ -2446,7 +2469,10 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
             "Dimension",
             vec![("Click", "two points, offset"), ("Esc", "cancel")],
         ),
-        Hatch => ("Hatch", vec![("Click", "inside an area"), ("Esc", "finish")]),
+        Hatch => (
+            "Hatch",
+            vec![("Click", "inside an area"), ("Esc", "finish")],
+        ),
         _ => ("", vec![]),
     }
 }
@@ -2757,9 +2783,7 @@ fn measurements(ui: &mut egui::Ui, kind: &EntityKind) {
             metric_field(ui, if *vertical { "Height" } else { "Width" }, d);
             return;
         }
-        EntityKind::AngularDim {
-            center, p1, p2, ..
-        } => {
+        EntityKind::AngularDim { center, p1, p2, .. } => {
             prop_section(ui, "MEASUREMENTS");
             let (cx, cy) = center.to_f64();
             let (a1x, a1y) = p1.to_f64();

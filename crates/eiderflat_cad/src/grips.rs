@@ -107,15 +107,20 @@ pub fn grips_for(kind: &EntityKind) -> Vec<Grip> {
                 Grip::new(GripRole::Rotation, rot),
             ]
         }
-        EntityKind::Dimension { p1, p2, line, .. }
-        | EntityKind::OrthoDim { p1, p2, line, .. } => vec![
-            Grip::new(GripRole::Endpoint(0), *p1),
-            Grip::new(GripRole::Endpoint(1), *p2),
-            // The offset handle that slides the dimension line.
-            Grip::new(GripRole::Vertex(2), *line),
-        ],
+        EntityKind::Dimension { p1, p2, line, .. } | EntityKind::OrthoDim { p1, p2, line, .. } => {
+            vec![
+                Grip::new(GripRole::Endpoint(0), *p1),
+                Grip::new(GripRole::Endpoint(1), *p2),
+                // The offset handle that slides the dimension line.
+                Grip::new(GripRole::Vertex(2), *line),
+            ]
+        }
         EntityKind::AngularDim {
-            center, p1, p2, line, ..
+            center,
+            p1,
+            p2,
+            line,
+            ..
         } => vec![
             Grip::new(GripRole::Vertex(0), *center),
             Grip::new(GripRole::Endpoint(1), *p1),

@@ -121,9 +121,7 @@ pub fn list_entity(doc: &Document, id: EntityId) -> Option<String> {
             let axis = if *vertical { "vertical" } else { "horizontal" };
             format!("DIMENSION ({axis})  length={d:.4}")
         }
-        EntityKind::AngularDim {
-            center, p1, p2, ..
-        } => {
+        EntityKind::AngularDim { center, p1, p2, .. } => {
             let (cx, cy) = center.to_f64();
             let (a1x, a1y) = p1.to_f64();
             let (a2x, a2y) = p2.to_f64();

@@ -37,7 +37,11 @@ pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
                 }
             }
             EntityKind::OrthoDim {
-                p1, p2, line, vertical, ..
+                p1,
+                p2,
+                line,
+                vertical,
+                ..
             } => {
                 let (a, b) = (p1.to_f64(), p2.to_f64());
                 let (lx, ly) = line.to_f64();
@@ -54,7 +58,11 @@ pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
                 }
             }
             EntityKind::AngularDim {
-                center, p1, p2, line, ..
+                center,
+                p1,
+                p2,
+                line,
+                ..
             } => {
                 let c = center.to_f64();
                 let r = line.dist_f64(center);

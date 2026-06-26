@@ -110,7 +110,9 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Pick the first line".into()
             }
         }
-        Tool::DimRadial { diameter, center, .. } => {
+        Tool::DimRadial {
+            diameter, center, ..
+        } => {
             let what = if *diameter { "diameter" } else { "radius" };
             if center.is_none() {
                 format!("Pick a circle or arc to {what}-dimension")
@@ -918,25 +920,60 @@ pub(super) fn draw_entity(
             }
         }
         EntityKind::Dimension {
-            p1, p2, line, override_text, ..
+            p1,
+            p2,
+            line,
+            override_text,
+            ..
         } => {
             draw_dimension(
-                painter, app, *p1, *p2, *line, override_text.as_deref(), &to_screen, stroke.color,
+                painter,
+                app,
+                *p1,
+                *p2,
+                *line,
+                override_text.as_deref(),
+                &to_screen,
+                stroke.color,
             );
         }
         EntityKind::OrthoDim {
-            p1, p2, line, vertical, override_text, ..
+            p1,
+            p2,
+            line,
+            vertical,
+            override_text,
+            ..
         } => {
             draw_ortho_dim(
-                painter, app, *p1, *p2, *line, *vertical, override_text.as_deref(), &to_screen,
+                painter,
+                app,
+                *p1,
+                *p2,
+                *line,
+                *vertical,
+                override_text.as_deref(),
+                &to_screen,
                 stroke.color,
             );
         }
         EntityKind::AngularDim {
-            center, p1, p2, line, override_text, ..
+            center,
+            p1,
+            p2,
+            line,
+            override_text,
+            ..
         } => {
             draw_angular_dim(
-                painter, app, *center, *p1, *p2, *line, override_text.as_deref(), &to_screen,
+                painter,
+                app,
+                *center,
+                *p1,
+                *p2,
+                *line,
+                override_text.as_deref(),
+                &to_screen,
                 stroke.color,
             );
         }
@@ -948,7 +985,13 @@ pub(super) fn draw_entity(
             ..
         } => {
             draw_radial_dim(
-                painter, app, *center, *edge, *diameter, override_text.as_deref(), &to_screen,
+                painter,
+                app,
+                *center,
+                *edge,
+                *diameter,
+                override_text.as_deref(),
+                &to_screen,
                 stroke.color,
             );
         }
@@ -1225,7 +1268,10 @@ pub(super) fn draw_radial_dim(
     let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);
     let galley = painter.layout_no_wrap(label, font_id, color);
     // Place text just beyond the edge along the leader direction.
-    let tip = (ex + ux * (text_px as f64 * 0.4), ey + uy * (text_px as f64 * 0.4));
+    let tip = (
+        ex + ux * (text_px as f64 * 0.4),
+        ey + uy * (text_px as f64 * 0.4),
+    );
     let st = to_screen(tip.0, tip.1);
     let off = if ux >= 0.0 {
         egui::vec2(2.0, -galley.size().y * 0.5)

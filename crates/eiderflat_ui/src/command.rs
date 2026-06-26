@@ -107,9 +107,7 @@ pub fn parse_command(input: &str) -> Command {
             p1: None,
             p2: None,
         }),
-        "DIMANGULAR" | "DIMANG" | "DIMANGLE" => {
-            Command::Activate(Tool::DimAngular { pts: vec![] })
-        }
+        "DIMANGULAR" | "DIMANG" | "DIMANGLE" => Command::Activate(Tool::DimAngular { pts: vec![] }),
         "DIMANGLINES" | "DIMANG2" | "DIMANGL" => Command::Activate(Tool::DimAngularLines {
             a: None,
             geom: None,

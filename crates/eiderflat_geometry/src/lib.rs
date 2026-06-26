@@ -12,9 +12,8 @@ pub use ops::{
     CurveIntersection, ProjectionResult, circle_through_three_points, common_tangent_segments,
     curvature_at, curve_to_curve_distance, intersect, intersect_circle_circle,
     intersect_line_circle, intersect_line_line, intersect_lines_unbounded, normal_at, offset_curve,
-    point_to_curve_distance,
-    project_point_onto_curve, refit_nurbs_subcurve, reverse_curve, split_curve, tangent_at,
-    tangent_circle_ttr, tangent_circle_ttt, tangent_points_from_point,
+    point_to_curve_distance, project_point_onto_curve, refit_nurbs_subcurve, reverse_curve,
+    split_curve, tangent_at, tangent_circle_ttr, tangent_circle_ttt, tangent_points_from_point,
 };
 pub use point::{BoundingBox, Point2d};
 pub use primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg, PolyCurve};

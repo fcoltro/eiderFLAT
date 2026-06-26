@@ -29,11 +29,20 @@ pub(crate) fn dimension_primitives(
     // so exported dimensions match what the canvas shows — including overrides.
     let label = eiderflat_document::label_text(kind, style, units)?;
     match kind {
-        EntityKind::Dimension { p1, p2, line, .. } => {
-            Some(linear(p1.to_f64(), p2.to_f64(), line.to_f64(), None, style, label))
-        }
+        EntityKind::Dimension { p1, p2, line, .. } => Some(linear(
+            p1.to_f64(),
+            p2.to_f64(),
+            line.to_f64(),
+            None,
+            style,
+            label,
+        )),
         EntityKind::OrthoDim {
-            p1, p2, line, vertical, ..
+            p1,
+            p2,
+            line,
+            vertical,
+            ..
         } => Some(linear(
             p1.to_f64(),
             p2.to_f64(),
@@ -43,7 +52,11 @@ pub(crate) fn dimension_primitives(
             label,
         )),
         EntityKind::AngularDim {
-            center, p1, p2, line, ..
+            center,
+            p1,
+            p2,
+            line,
+            ..
         } => Some(angular(
             center.to_f64(),
             p1.to_f64(),
@@ -53,8 +66,17 @@ pub(crate) fn dimension_primitives(
             label,
         )),
         EntityKind::RadialDim {
-            center, edge, diameter, ..
-        } => Some(radial(center.to_f64(), edge.to_f64(), *diameter, style, label)),
+            center,
+            edge,
+            diameter,
+            ..
+        } => Some(radial(
+            center.to_f64(),
+            edge.to_f64(),
+            *diameter,
+            style,
+            label,
+        )),
         _ => None,
     }
 }
@@ -161,7 +183,10 @@ fn angular(center: P, p1: P, p2: P, line: P, style: &DimStyle, label: String) ->
     arrow(e2, near_end, asz, &mut segs);
 
     let mid_a = start + sweep * 0.5;
-    let label_pt = (cx + (r + style.text_height) * mid_a.cos(), cy + (r + style.text_height) * mid_a.sin());
+    let label_pt = (
+        cx + (r + style.text_height) * mid_a.cos(),
+        cy + (r + style.text_height) * mid_a.sin(),
+    );
     let text = DimText {
         content: label,
         anchor: pt(label_pt),
@@ -194,7 +219,10 @@ fn radial(center: P, edge: P, diameter: bool, style: &DimStyle, label: String) -
     if diameter {
         arrow(near, edge, asz, &mut segs);
     }
-    let label_pt = (ex + ux * style.text_height * 0.4, ey + uy * style.text_height * 0.4);
+    let label_pt = (
+        ex + ux * style.text_height * 0.4,
+        ey + uy * style.text_height * 0.4,
+    );
     let text = DimText {
         content: label,
         anchor: pt(label_pt),
