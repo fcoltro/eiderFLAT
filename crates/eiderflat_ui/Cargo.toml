@@ -1,17 +1,20 @@
 [package]
-publish = false
 name = "eiderflat_ui"
-version = "0.1.4-alpha"
-edition = "2024"
-license = "GPL-3.0-or-later"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
-eiderflat_geometry   = { path = "../eiderflat_geometry" }
-eiderflat_document   = { path = "../eiderflat_document" }
-eiderflat_cad        = { path = "../eiderflat_cad" }
-eiderflat_io         = { path = "../eiderflat_io" }
-egui = "0.34"
-rfd = "0.17"
-fontdb = "0.23"
-ttf-parser = "0.25"
-resvg = { version = "0.47", default-features = false }
+eiderflat_geometry.workspace = true
+eiderflat_document.workspace = true
+eiderflat_cad.workspace = true
+eiderflat_io.workspace = true
+egui.workspace = true
+rfd.workspace = true
+fontdb.workspace = true
+ttf-parser.workspace = true
+resvg.workspace = true
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@ use eiderflat_cad::{
     Grip, Guide, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps_excluding,
     grips_for, infer_axis, pick_at,
 };
-use eiderflat_document::{Document, EntityId, EntityKind, Layer, LineTypeRef, LineWeight};
+use eiderflat_document::{Document, Entity, EntityId, EntityKind, Layer, LineTypeRef, LineWeight};
 use eiderflat_geometry::{Curve, Point2d};
 
 use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
@@ -49,6 +49,9 @@ pub struct AppState {
     /// Show a curvature comb on selected curves, and its tooth scale.
     pub comb_on: bool,
     pub comb_scale: f64,
+    /// In-app clipboard: entities captured by Copy/Cut, pasted at the cursor.
+    /// Independent of the OS clipboard; lives only for the running session.
+    pub clipboard: Vec<Entity>,
 }
 
 /// User interface preferences that persist across sessions (the snap/tracking
@@ -273,7 +276,68 @@ impl AppState {
             default_line_weight: LineWeight::ByLayer,
             comb_on: false,
             comb_scale: 5.0,
+            clipboard: Vec::new(),
         }
+    }
+
+    /// Whether anything is selected (drives enable-state of selection-only UI).
+    pub fn has_selection(&self) -> bool {
+        self.selection.iter().any(|&id| id != self.origin_id)
+    }
+
+    /// Copy the current selection into the in-app clipboard. Returns the number
+    /// of entities captured.
+    pub fn clipboard_copy(&mut self) -> usize {
+        let items: Vec<Entity> = self
+            .selection
+            .iter()
+            .filter(|&&id| id != self.origin_id)
+            .filter_map(|&id| self.document.get(id).cloned())
+            .collect();
+        let n = items.len();
+        if n > 0 {
+            self.clipboard = items;
+        }
+        n
+    }
+
+    /// Copy then erase the selection (clipboard cut).
+    pub fn clipboard_cut(&mut self) {
+        if self.clipboard_copy() > 0 {
+            self.erase_selection();
+        }
+    }
+
+    /// Paste the clipboard so its bounding-box centre lands on the cursor; the
+    /// pasted entities become the new selection. A no-op on an empty clipboard.
+    pub fn clipboard_paste(&mut self) {
+        if self.clipboard.is_empty() {
+            return;
+        }
+        // Combined bounding box of the clipboard, to anchor the paste at the cursor.
+        let bbox = self
+            .clipboard
+            .iter()
+            .filter_map(|e| e.bounding_box())
+            .reduce(|a, b| a.union(&b));
+        let (dx, dy) = match bbox {
+            Some(bb) => {
+                let cx = (bb.min.x + bb.max.x) * 0.5;
+                let cy = (bb.min.y + bb.max.y) * 0.5;
+                (self.cursor_world.0 - cx, self.cursor_world.1 - cy)
+            }
+            None => (0.0, 0.0),
+        };
+        let t = eiderflat_geometry::Transform2d::translation(dx, dy);
+        self.history.snapshot(&self.document);
+        let mut pasted = Vec::with_capacity(self.clipboard.len());
+        for e in &self.clipboard {
+            let mut copy = e.clone();
+            copy.transform(&t);
+            pasted.push(self.document.add_entity(copy));
+        }
+        self.selection = pasted;
+        self.tool = Tool::Select;
     }
 
     /// Apply the current new-entity line defaults to a just-created entity.
@@ -285,7 +349,12 @@ impl AppState {
         );
         let is_dim = matches!(
             self.document.get(id).map(|e| &e.kind),
-            Some(eiderflat_document::EntityKind::Dimension { .. })
+            Some(
+                eiderflat_document::EntityKind::Dimension { .. }
+                    | eiderflat_document::EntityKind::OrthoDim { .. }
+                    | eiderflat_document::EntityKind::AngularDim { .. }
+                    | eiderflat_document::EntityKind::RadialDim { .. }
+            )
         );
         let dim_layer = is_dim.then(|| {
             self.document.layers.add(
@@ -363,12 +432,8 @@ impl AppState {
                 let dist = (dx * dx + dy * dy).sqrt();
                 if self.polar_on && dist > 1e-4 {
                     let angle_rad = dy.atan2(dx);
-                    let angle_deg = angle_rad.to_degrees();
-                    let angle_deg_wrapped = if angle_deg < 0.0 {
-                        angle_deg + 360.0
-                    } else {
-                        angle_deg
-                    };
+                    let angle_deg_wrapped =
+                        eiderflat_geometry::wrap_deg360(angle_rad.to_degrees());
                     let nearest_45 = (angle_deg_wrapped / 45.0).round() * 45.0;
                     let diff = (angle_deg_wrapped - nearest_45).abs();
                     let diff = diff.min(360.0 - diff);
@@ -892,6 +957,33 @@ impl AppState {
         self.history.snapshot(&self.document);
     }
 
+    /// The text override of a dimension entity (`None` for non-dimensions or when
+    /// no override is set).
+    pub fn dim_override(&self, id: EntityId) -> Option<String> {
+        match &self.document.get(id)?.kind {
+            EntityKind::Dimension { override_text, .. }
+            | EntityKind::OrthoDim { override_text, .. }
+            | EntityKind::AngularDim { override_text, .. }
+            | EntityKind::RadialDim { override_text, .. } => override_text.clone(),
+            _ => None,
+        }
+    }
+
+    /// Set (or clear, with `None`/empty) a dimension's text override. No-op for
+    /// non-dimension entities.
+    pub fn set_dim_override(&mut self, id: EntityId, text: Option<String>) {
+        let text = text.filter(|t| !t.trim().is_empty());
+        if let Some(e) = self.document.get_mut(id) {
+            match &mut e.kind {
+                EntityKind::Dimension { override_text, .. }
+                | EntityKind::OrthoDim { override_text, .. }
+                | EntityKind::AngularDim { override_text, .. }
+                | EntityKind::RadialDim { override_text, .. } => *override_text = text,
+                _ => {}
+            }
+        }
+    }
+
     pub fn commit_text_edit(
         &mut self,
         id: EntityId,
@@ -1341,6 +1433,55 @@ mod tests {
         AppState::new(800.0, 600.0)
     }
 
+    fn line(x0: i64, y0: i64, x1: i64, y1: i64) -> EntityKind {
+        EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(pt(x0, y0), pt(x1, y1))))
+    }
+
+    #[test]
+    fn clipboard_copy_paste_duplicates_at_cursor() {
+        let mut a = app();
+        let id = a.document.add(line(0, 0, 10, 0));
+        a.selection = vec![id];
+        assert_eq!(a.clipboard_copy(), 1);
+
+        // Paste with the cursor at (50, 20): the copy's bbox centre (5, 0) lands
+        // there, so the pasted segment is the original shifted by (45, 20).
+        a.cursor_world = (50.0, 20.0);
+        let before = a.document.len();
+        a.clipboard_paste();
+        assert_eq!(a.document.len(), before + 1);
+        assert_eq!(a.selection.len(), 1, "pasted entity becomes the selection");
+
+        let pasted = a.document.get(a.selection[0]).unwrap();
+        if let EntityKind::Curve(Curve::Line(l)) = &pasted.kind {
+            assert!((l.p0.x - 45.0).abs() < 1e-9 && (l.p0.y - 20.0).abs() < 1e-9);
+            assert!((l.p1.x - 55.0).abs() < 1e-9 && (l.p1.y - 20.0).abs() < 1e-9);
+        } else {
+            panic!("expected a pasted line");
+        }
+    }
+
+    #[test]
+    fn clipboard_cut_removes_then_pastes() {
+        let mut a = app();
+        let id = a.document.add(line(0, 0, 2, 2));
+        a.selection = vec![id];
+        let with_entity = a.document.len();
+        a.clipboard_cut();
+        assert_eq!(a.document.len(), with_entity - 1, "cut removes the entity");
+        a.cursor_world = (0.0, 0.0);
+        a.clipboard_paste();
+        assert_eq!(a.document.len(), with_entity, "paste restores one entity");
+    }
+
+    #[test]
+    fn paste_with_empty_clipboard_is_noop() {
+        let mut a = app();
+        let before = a.document.len();
+        a.clipboard_paste();
+        assert_eq!(a.document.len(), before);
+    }
+
     #[test]
     fn ui_prefs_round_trip() {
         let p = UiPrefs {
@@ -1378,6 +1519,99 @@ mod tests {
             .expect("a dimension entity");
         let layer = a.document.layers.get(dim.layer).expect("its layer");
         assert_eq!(layer.name, eiderflat_document::DIMENSION_LAYER);
+    }
+
+    #[test]
+    fn angular_dimension_tool_creates_angular_dim() {
+        let mut a = app();
+        a.snap_on = false;
+        a.tool = crate::tools::Tool::DimAngular { pts: vec![] };
+        a.place_tool_point(Point2d::from_f64(0.0, 0.0)); // vertex
+        a.place_tool_point(Point2d::from_f64(10.0, 0.0)); // ray 1
+        a.place_tool_point(Point2d::from_f64(0.0, 10.0)); // ray 2
+        a.place_tool_point(Point2d::from_f64(5.0, 5.0)); // arc location → commit
+        let dim = a
+            .document
+            .iter()
+            .find(|e| matches!(e.kind, eiderflat_document::EntityKind::AngularDim { .. }))
+            .expect("an angular dimension");
+        // Lands on the Dimensions layer like other dimensions.
+        let layer = a.document.layers.get(dim.layer).expect("its layer");
+        assert_eq!(layer.name, eiderflat_document::DIMENSION_LAYER);
+    }
+
+    #[test]
+    fn radial_dimension_tool_dimensions_a_circle() {
+        let mut a = app();
+        a.snap_on = false;
+        // A circle centred at (0,0), radius 5.
+        let circle = a.document.add(EntityKind::Curve(Curve::Arc(
+            eiderflat_geometry::CircularArc::new(
+                Point2d::from_f64(0.0, 0.0),
+                5.0,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+        )));
+        a.tool = crate::tools::Tool::DimRadial {
+            diameter: false,
+            center: None,
+            radius: 0.0,
+        };
+        // First click picks the circle; aim near it so pick_at resolves.
+        let (sx, sy) = a.view.world_to_screen(5.0, 0.0);
+        a.canvas_click(sx, sy);
+        // The tool now carries the circle's centre + radius.
+        assert!(
+            matches!(a.tool, crate::tools::Tool::DimRadial { center: Some(_), radius, .. } if (radius - 5.0).abs() < 1e-9),
+            "circle pick set centre+radius"
+        );
+        // Second click aims the leader and commits.
+        let (lx, ly) = a.view.world_to_screen(0.0, 6.0);
+        a.canvas_click(lx, ly);
+        let made = a
+            .document
+            .iter()
+            .any(|e| matches!(&e.kind, EntityKind::RadialDim { center, .. } if *center == Point2d::from_f64(0.0, 0.0)));
+        assert!(made, "radial dimension created on the circle");
+        let _ = circle;
+    }
+
+    #[test]
+    fn angular_from_two_lines_creates_dim_at_intersection() {
+        let mut a = app();
+        a.snap_on = false;
+        // Two lines meeting at the origin: along +X and along +Y.
+        a.document.add(EntityKind::Curve(Curve::Line(
+            LineSeg::from_endpoints(Point2d::from_f64(0.0, 0.0), Point2d::from_f64(10.0, 0.0)),
+        )));
+        a.document.add(EntityKind::Curve(Curve::Line(
+            LineSeg::from_endpoints(Point2d::from_f64(0.0, 0.0), Point2d::from_f64(0.0, 10.0)),
+        )));
+        a.tool = crate::tools::Tool::DimAngularLines {
+            a: None,
+            geom: None,
+        };
+        // Pick line 1, pick line 2, then place the arc.
+        let (s1x, s1y) = a.view.world_to_screen(5.0, 0.0);
+        a.canvas_click(s1x, s1y);
+        let (s2x, s2y) = a.view.world_to_screen(0.0, 5.0);
+        a.canvas_click(s2x, s2y);
+        assert!(
+            matches!(a.tool, crate::tools::Tool::DimAngularLines { geom: Some(_), .. }),
+            "two line picks produced the angle geometry"
+        );
+        let (lx, ly) = a.view.world_to_screen(3.0, 3.0);
+        a.canvas_click(lx, ly);
+        let dim = a
+            .document
+            .iter()
+            .find_map(|e| match &e.kind {
+                EntityKind::AngularDim { center, .. } => Some(*center),
+                _ => None,
+            })
+            .expect("an angular dimension");
+        assert!(dim.dist_f64(&Point2d::from_f64(0.0, 0.0)) < 1e-6, "vertex at intersection");
     }
 
     #[test]

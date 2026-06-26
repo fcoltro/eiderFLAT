@@ -347,11 +347,45 @@ pub fn export_dxf(doc: &Document) -> String {
             .get(e.layer)
             .map(|l| l.name.clone())
             .unwrap_or_else(|| "0".into());
-        write_entity(&mut w, &e.kind, &layer_name);
+        if let Some(prims) = crate::dim::dimension_primitives(
+            &e.kind,
+            &doc.settings.dim_style,
+            doc.settings.units,
+        ) {
+            dimension_to_dxf(&mut w, &prims, &layer_name);
+        } else {
+            write_entity(&mut w, &e.kind, &layer_name);
+        }
     }
     w(0, "ENDSEC");
     w(0, "EOF");
     s
+}
+
+/// Emit a decomposed dimension as DXF LINE entities plus a TEXT label.
+fn dimension_to_dxf(w: &mut impl FnMut(i32, &str), prims: &crate::dim::DimPrimitives, layer: &str) {
+    for (a, b) in &prims.segs {
+        w(0, "LINE");
+        w(8, layer);
+        w(10, &fmt(a.x));
+        w(20, &fmt(a.y));
+        w(11, &fmt(b.x));
+        w(21, &fmt(b.y));
+    }
+    if let Some(t) = &prims.text {
+        w(0, "TEXT");
+        w(8, layer);
+        w(10, &fmt(t.anchor.x));
+        w(20, &fmt(t.anchor.y));
+        w(40, &fmt(t.height));
+        // Middle-centre justification so the label sits on its anchor point.
+        w(72, "1");
+        w(73, "2");
+        w(11, &fmt(t.anchor.x));
+        w(21, &fmt(t.anchor.y));
+        w(1, &t.content);
+        w(50, &fmt(t.rotation_deg));
+    }
 }
 
 fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str) {
@@ -551,6 +585,23 @@ mod tests {
 
     fn pt(x: i64, y: i64) -> Point2d {
         Point2d::from_i64(x, y)
+    }
+
+    #[test]
+    fn exports_dimensions_as_lines_and_text() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::AngularDim {
+            center: pt(0, 0),
+            p1: pt(10, 0),
+            p2: pt(0, 10),
+            line: pt(5, 5),
+            height: 2.5,
+            override_text: None,
+        });
+        let dxf = export_dxf(&doc);
+        assert!(dxf.contains("LINE"), "dimension geometry exported as LINEs");
+        assert!(dxf.contains("TEXT"), "dimension value exported as TEXT");
+        assert!(dxf.contains('\u{00b0}'), "degree symbol in the angle label");
     }
 
     #[test]

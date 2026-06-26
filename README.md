@@ -50,23 +50,34 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 
 ### Modifying
 - **Move, Copy, Rotate, Scale, Mirror, Stretch**
+- **Cut / Copy / Paste** (`Ctrl+X / C / V`) — paste lands at the cursor
 - **Offset** — segment-mitred for polylines/polygons, exact for NURBS
 - **Trim & Extend** — span-aware and spline-preserving
 - **Fillet & Chamfer** on lines and polyline corners
 - **Disjoint** (explode) / **Join**, and **Hatch** — region-based solid fill with islands
 - CAD-style **grips** on every selected entity — drag to reshape, or type exact values
 - Contextual corner fillet/chamfer dots and bounding-box transform handles
-- A floating **contextual toolbar** (duplicate, mirror, rotate, offset, delete) above the selection
+- A floating **contextual toolbar** (duplicate, mirror, rotate, offset, delete) above the selection — follows multi-selections too
+
+### Dimensioning
+- **Linear / Aligned** — distance between two points, parallel to the measured span
+- **Horizontal / Vertical** — axis-locked linear dimensions
+- **Angular** — from three points (vertex + two sides) or from two picked lines
+- **Radius & Diameter** — pick a circle or arc, then aim the leader (`R` / `⌀`)
+- **Text override** per dimension, and a drawing-wide **decimal-precision** setting
+- Dimensions export to DXF and SVG as ordinary geometry + text
 
 ### Workspace & UI
 - **Layers** with colour, show/hide, rename and current-layer — seeded with a sensible default set
 - Editable **Properties inspector**: geometry, measurements, line weight, line type and layer
 - **Object snapping** — Endpoint, Midpoint, Center, Quadrant, Intersection, Perpendicular, Tangent, Nearest, Node, Insertion
-- Grid + grid snap, **polar / angle guides**, and a **dynamic input HUD**
+- Grid + grid snap, **polar / angle guides**, and a **dynamic input HUD** (type a size in the direction you aim — no negative numbers)
 - Window / crossing marquee, hover highlight, and ghost previews for transforms
 - **⌘K / Ctrl+K command palette** plus an always-available command line
+- A translucent **tool-hint panel** showing the active tool's keys (and getting-started tips on a blank canvas)
 - **Drawing units** (mm / cm / m / km / in / ft / unitless) that bound the zoom range
-- Modern dark, glass-panelled interface — top bar, tool dock, inspector, status pill
+- Viewport-culled rendering, so large drawings stay smooth
+- Modern dark, glass-panelled interface — top bar, two-column tool dock (draw + modify), inspector, status pill
 
 ### Geometry kernel
 - Exact **boolean region** ops (union / intersection / difference / xor) via Greiner–Hormann clipping with robust winding
@@ -95,11 +106,14 @@ Type a word in the command line (or use the toolbars / palette). Common aliases:
 | `POLYGON` / `POL` | Polygon | `TRIM` / `TR` | Trim | `REDO` | Redo |
 | `SPLINE` / `SPL` | NURBS spline | `EXTEND` / `EX` | Extend | `ALL` | Select all |
 | `TEXT` / `T` / `MTEXT` | Text | `FILLET` / `F` | Fillet | `ZOOM` / `Z` | Zoom |
-| | | `CHAMFER` / `CHA` | Chamfer | `LAYER` / `LA` | Layers |
-| | | `STRETCH` / `S` | Stretch | | |
+| `DIMENSION` / `DIM` | Dimension (aligned) | `CHAMFER` / `CHA` | Chamfer | `LAYER` / `LA` | Layers |
+| `DIMHOR` / `DIMVER` | Horizontal / Vertical dim | `STRETCH` / `S` | Stretch | | |
+| `DIMANG` / `DIMANGL` | Angular (3-pt / 2-line) | | | | |
+| `DIMRAD` / `DIMDIA` | Radius / Diameter | | | | |
 
 Coordinate entry supports `x,y` (absolute), `@dx,dy` (relative), `d<a` (polar
-absolute) and `@d<a` (polar relative, degrees).
+absolute) and `@d<a` (polar relative, degrees). Clipboard: `Ctrl+X` cut,
+`Ctrl+C` copy, `Ctrl+V` paste at the cursor.
 
 ## 🔨 Build & run
 
@@ -123,10 +137,10 @@ every crate below `eiderflat_ui` is headless and independently testable.
 
 | Crate | Responsibility |
 |-------|----------------|
-| `eiderflat_geometry` | Curve primitives (line, arc, ellipse, cubic, polycurve, NURBS), transforms, ops (intersect / distance / curvature / offset / split) |
+| `eiderflat_geometry` | Curve primitives (line, arc, ellipse, cubic, polycurve, NURBS), transforms, ops (intersect / distance / curvature / offset / split), and shared numeric utilities (angle / point-segment helpers) reused across every crate |
 | `eiderflat_spatial` | Adaptive quadtree + Morton-code spatial index |
 | `eiderflat_boolean` | Planar region boolean ops (union / intersection / difference / xor) with robust winding |
-| `eiderflat_document` | Document / layer / entity / block model |
+| `eiderflat_document` | Document / layer / entity / block model, plus the shared dimension geometry + labelling used by both the renderer and exporters |
 | `eiderflat_cad` | Snapping, selection, grips, draw + edit (trim / extend / fillet / chamfer / offset / hatch / …) |
 | `eiderflat_io` | DXF, SVG and native `.e2d` import / export |
 | `eiderflat_ui` | Headless app state + egui view (toolbars, canvas, panels, command palette) |

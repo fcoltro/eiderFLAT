@@ -99,6 +99,11 @@ pub fn apply(ctx: &Context) {
         s.spacing.item_spacing = egui::vec2(tok::SP_2, 5.0);
         s.spacing.button_padding = egui::vec2(7.0, 4.0);
         s.spacing.menu_margin = egui::Margin::same(tok::SP_3 as i8);
+        // Hold tooltips back briefly so hovering across the dense toolbars doesn't
+        // flash a tip on every icon the pointer crosses; once shown, let them
+        // linger long enough to read.
+        s.interaction.tooltip_delay = 0.45;
+        s.interaction.tooltip_grace_time = 0.25;
         s.text_styles = [
             (
                 TextStyle::Small,

@@ -1,3 +1,4 @@
+pub(crate) mod dim;
 pub mod dxf;
 pub mod native;
 pub mod svg;

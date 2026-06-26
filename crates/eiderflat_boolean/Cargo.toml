@@ -1,10 +1,13 @@
 [package]
-publish = false
 name = "eiderflat_boolean"
-version = "0.1.4-alpha"
-edition = "2024"
-license = "GPL-3.0-or-later"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
-eiderflat_geometry = { path = "../eiderflat_geometry" }
-robust = "1"
+eiderflat_geometry.workspace = true
+robust.workspace = true
+
+[lints]
+workspace = true

@@ -387,9 +387,66 @@ pub fn icon_button_sized(
     }
 
     if hovered {
-        response = response.on_hover_text(tooltip);
+        response = response.on_hover_ui(|ui| rich_tooltip(ui, tooltip));
     }
     response
+}
+
+/// Render a button tooltip from a string like `"Offset  (Shift+O) — type a
+/// distance"`: the name in bold, the parenthesised shortcut as a keycap chip, and
+/// any trailing `— description` as a dimmed second line.
+fn rich_tooltip(ui: &mut Ui, text: &str) {
+    // Split off a leading "(shortcut)" group, if present.
+    let (head, keys) = match (text.find('('), text.find(')')) {
+        (Some(o), Some(c)) if c > o => (
+            text[..o].trim().to_string(),
+            Some(text[o + 1..c].trim().to_string()),
+        ),
+        _ => (text.to_string(), None),
+    };
+    // Anything after the ")" that begins with an em dash is the description.
+    let desc = text
+        .find(')')
+        .map(|c| text[c + 1..].trim())
+        .unwrap_or("")
+        .trim_start_matches('—')
+        .trim()
+        .to_string();
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 7.0;
+        ui.label(
+            egui::RichText::new(head)
+                .strong()
+                .color(crate::theme::TEXT),
+        );
+        if let Some(k) = keys.filter(|k| !k.is_empty()) {
+            let galley = ui.painter().layout_no_wrap(
+                k.clone(),
+                egui::FontId::monospace(11.0),
+                crate::theme::TEXT,
+            );
+            let pad = Vec2::new(5.0, 2.0);
+            let size = galley.size() + pad * 2.0;
+            let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+            ui.painter().rect(
+                rect,
+                4.0,
+                Color32::from_rgba_unmultiplied(40, 48, 64, 235),
+                Stroke::new(1.0, crate::theme::OUTLINE),
+                egui::StrokeKind::Inside,
+            );
+            ui.painter()
+                .galley(rect.min + pad, galley, crate::theme::TEXT);
+        }
+    });
+    if !desc.is_empty() {
+        ui.label(
+            egui::RichText::new(desc)
+                .size(11.5)
+                .color(crate::theme::TEXT_DIM),
+        );
+    }
 }
 
 fn snap_rect(r: Rect, pixels_per_point: f32) -> Rect {

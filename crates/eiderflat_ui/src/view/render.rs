@@ -87,6 +87,37 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
             (Some(_), None) => "Specify second dimension point".into(),
             (Some(_), Some(_)) => "Specify dimension line location".into(),
         },
+        Tool::DimOrtho { vertical, p1, p2 } => {
+            let axis = if *vertical { "vertical" } else { "horizontal" };
+            match (p1, p2) {
+                (None, _) => format!("Specify first point ({axis})"),
+                (Some(_), None) => "Specify second point".into(),
+                (Some(_), Some(_)) => "Specify dimension line location".into(),
+            }
+        }
+        Tool::DimAngular { pts } => match pts.len() {
+            0 => "Specify the angle vertex".into(),
+            1 => "Specify a point on the first side".into(),
+            2 => "Specify a point on the second side".into(),
+            _ => "Click to place the dimension arc".into(),
+        },
+        Tool::DimAngularLines { a, geom } => {
+            if geom.is_some() {
+                "Click to place the dimension arc".into()
+            } else if a.is_some() {
+                "Pick the second line".into()
+            } else {
+                "Pick the first line".into()
+            }
+        }
+        Tool::DimRadial { diameter, center, .. } => {
+            let what = if *diameter { "diameter" } else { "radius" };
+            if center.is_none() {
+                format!("Pick a circle or arc to {what}-dimension")
+            } else {
+                "Click to place the leader".into()
+            }
+        }
         Tool::Ellipse { center, axis_end } => match (center, axis_end) {
             (None, _) => "Specify center of ellipse".into(),
             (Some(_), None) => "Specify end of first axis".into(),
@@ -886,8 +917,40 @@ pub(super) fn draw_entity(
                 }
             }
         }
-        EntityKind::Dimension { p1, p2, line, .. } => {
-            draw_dimension(painter, app, *p1, *p2, *line, &to_screen, stroke.color);
+        EntityKind::Dimension {
+            p1, p2, line, override_text, ..
+        } => {
+            draw_dimension(
+                painter, app, *p1, *p2, *line, override_text.as_deref(), &to_screen, stroke.color,
+            );
+        }
+        EntityKind::OrthoDim {
+            p1, p2, line, vertical, override_text, ..
+        } => {
+            draw_ortho_dim(
+                painter, app, *p1, *p2, *line, *vertical, override_text.as_deref(), &to_screen,
+                stroke.color,
+            );
+        }
+        EntityKind::AngularDim {
+            center, p1, p2, line, override_text, ..
+        } => {
+            draw_angular_dim(
+                painter, app, *center, *p1, *p2, *line, override_text.as_deref(), &to_screen,
+                stroke.color,
+            );
+        }
+        EntityKind::RadialDim {
+            center,
+            edge,
+            diameter,
+            override_text,
+            ..
+        } => {
+            draw_radial_dim(
+                painter, app, *center, *edge, *diameter, override_text.as_deref(), &to_screen,
+                stroke.color,
+            );
         }
         _ => {}
     }
@@ -897,12 +960,14 @@ pub(super) fn draw_entity(
 /// points out to the dimension line, the dimension line with arrowheads, and
 /// the measured length as text — rotated to sit along the dimension line and
 /// sized/fonted by the document's dimension style.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_dimension(
     painter: &egui::Painter,
     app: &AppState,
     p1: Point2d,
     p2: Point2d,
     line: Point2d,
+    ovr: Option<&str>,
     to_screen: &impl Fn(f64, f64) -> egui::Pos2,
     color: Color32,
 ) {
@@ -939,8 +1004,11 @@ pub(super) fn draw_dimension(
     arrowhead(painter, sd1, sd2, arrow_px, color);
     arrowhead(painter, sd2, sd1, arrow_px, color);
 
-    // Measured length, laid along the dimension line and kept upright.
-    let label = format_measure(len, app.document.settings.units);
+    // Measured length (or the user's override), laid along the dimension line.
+    let label = match ovr {
+        Some(t) => t.to_string(),
+        None => format_measure(len, app.document.settings.units, style.precision),
+    };
     let text_px = (style.text_height as f32 * zoom).clamp(9.0, 200.0);
     let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);
     let galley = painter.layout_no_wrap(label, font_id, color);
@@ -971,6 +1039,202 @@ pub(super) fn draw_dimension(
     painter.add(shape);
 }
 
+/// Draw an axis-locked (horizontal or vertical) linear dimension. The dimension
+/// line runs horizontally through `line.y` (or vertically through `line.x`),
+/// measuring only the horizontal (or vertical) component of `p1`→`p2`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_ortho_dim(
+    painter: &egui::Painter,
+    app: &AppState,
+    p1: Point2d,
+    p2: Point2d,
+    line: Point2d,
+    vertical: bool,
+    ovr: Option<&str>,
+    to_screen: &impl Fn(f64, f64) -> egui::Pos2,
+    color: Color32,
+) {
+    let (x1, y1) = p1.to_f64();
+    let (x2, y2) = p2.to_f64();
+    let (lx, ly) = line.to_f64();
+    // Dimension-line endpoints: share the offset axis, keep each point's own
+    // coordinate on the measured axis.
+    let (d1, d2, measured) = if vertical {
+        ((lx, y1), (lx, y2), (y2 - y1).abs())
+    } else {
+        ((x1, ly), (x2, ly), (x2 - x1).abs())
+    };
+    if measured < 1e-12 {
+        return;
+    }
+
+    let s1 = to_screen(x1, y1);
+    let s2 = to_screen(x2, y2);
+    let sd1 = to_screen(d1.0, d1.1);
+    let sd2 = to_screen(d2.0, d2.1);
+    let stroke = Stroke::new(1.0, color);
+    let style = &app.document.settings.dim_style;
+    let zoom = app.view.zoom as f32;
+
+    painter.line_segment([s1, sd1], stroke);
+    painter.line_segment([s2, sd2], stroke);
+    painter.line_segment([sd1, sd2], stroke);
+    let arrow_px = (style.arrow_size as f32 * zoom).clamp(4.0, 60.0);
+    arrowhead(painter, sd1, sd2, arrow_px, color);
+    arrowhead(painter, sd2, sd1, arrow_px, color);
+
+    // Upright text centred just off the dimension line, away from the geometry.
+    let label = match ovr {
+        Some(t) => t.to_string(),
+        None => format_measure(measured, app.document.settings.units, style.precision),
+    };
+    let text_px = (style.text_height as f32 * zoom).clamp(9.0, 200.0);
+    let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);
+    let galley = painter.layout_no_wrap(label, font_id, color);
+    let mid = pos2((sd1.x + sd2.x) * 0.5, (sd1.y + sd2.y) * 0.5);
+    let mid_meas = pos2((s1.x + s2.x) * 0.5, (s1.y + s2.y) * 0.5);
+    let gap = text_px * 0.5 + 3.0;
+    // Push the text to the side of the dimension line away from the measured pts.
+    let perp = if vertical {
+        let s = if mid.x >= mid_meas.x { 1.0 } else { -1.0 };
+        vec2(s * (gap + galley.size().x * 0.5), 0.0)
+    } else {
+        let s = if mid.y >= mid_meas.y { 1.0 } else { -1.0 };
+        vec2(0.0, s * gap)
+    };
+    let center = mid + perp;
+    painter.galley(center - galley.size() * 0.5, galley, color);
+}
+
+/// Draw an angular dimension: extension lines from the two ray points out to the
+/// dimension arc, the arc itself with arrowheads at both ends, and the measured
+/// angle as text centred on the arc. The arc radius/side follow `line`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_angular_dim(
+    painter: &egui::Painter,
+    app: &AppState,
+    center: Point2d,
+    p1: Point2d,
+    p2: Point2d,
+    line: Point2d,
+    ovr: Option<&str>,
+    to_screen: &impl Fn(f64, f64) -> egui::Pos2,
+    color: Color32,
+) {
+    let (cx, cy) = center.to_f64();
+    // Sweep/sector and radius are resolved by the shared dimension kernel so the
+    // renderer and the exporters stay in lock-step.
+    let sw = eiderflat_document::angular_sweep(center, p1, p2, line);
+    let (start, sweep, r) = (sw.start, sw.sweep, sw.radius);
+
+    let stroke = Stroke::new(1.0, color);
+    // Extension lines from each ray point out to the arc.
+    let arc_pt = |ang: f64| (cx + r * ang.cos(), cy + r * ang.sin());
+    let (e1x, e1y) = arc_pt(start);
+    let (e2x, e2y) = arc_pt(start + sweep);
+    painter.line_segment([to_screen(p1.x, p1.y), to_screen(e1x, e1y)], stroke);
+    painter.line_segment([to_screen(p2.x, p2.y), to_screen(e2x, e2y)], stroke);
+
+    // The dimension arc, flattened into a screen polyline.
+    let steps = 48.max((sweep.abs() / 0.05) as usize).min(512);
+    let mut pts: Vec<egui::Pos2> = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let a = start + sweep * (i as f64 / steps as f64);
+        let (x, y) = arc_pt(a);
+        pts.push(to_screen(x, y));
+    }
+    painter.add(egui::Shape::line(pts.clone(), stroke));
+
+    // Arrowheads tangent to the arc at each end.
+    let style = &app.document.settings.dim_style;
+    let arrow_px = (style.arrow_size as f32 * app.view.zoom as f32).clamp(4.0, 60.0);
+    if pts.len() >= 2 {
+        arrowhead(painter, pts[0], pts[1], arrow_px, color);
+        let n = pts.len();
+        arrowhead(painter, pts[n - 1], pts[n - 2], arrow_px, color);
+    }
+
+    // Angle text at the arc midpoint, pushed slightly outward.
+    let mid_a = start + sweep * 0.5;
+    let (mx, my) = (cx + r * mid_a.cos(), cy + r * mid_a.sin());
+    let deg = sweep.abs().to_degrees();
+    let label = match ovr {
+        Some(t) => t.to_string(),
+        None => format!("{deg:.*}\u{00b0}", style.precision),
+    };
+    let text_px = (style.text_height as f32 * app.view.zoom as f32).clamp(9.0, 200.0);
+    let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);
+    let galley = painter.layout_no_wrap(label, font_id, color);
+    let out = text_px * 0.5 + 3.0;
+    let sc = to_screen(mx, my);
+    let dir = egui::vec2(mid_a.cos() as f32, -(mid_a.sin() as f32));
+    let pos = sc + dir * out - galley.size() * 0.5;
+    painter.galley(pos, galley, color);
+}
+
+/// Draw a radius or diameter dimension: a leader line from the centre out through
+/// the circle edge (the full chord for a diameter), an arrowhead at the edge, and
+/// the `R`/`⌀` value as text by the leader.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_radial_dim(
+    painter: &egui::Painter,
+    app: &AppState,
+    center: Point2d,
+    edge: Point2d,
+    diameter: bool,
+    ovr: Option<&str>,
+    to_screen: &impl Fn(f64, f64) -> egui::Pos2,
+    color: Color32,
+) {
+    let (cx, cy) = center.to_f64();
+    let (ex, ey) = edge.to_f64();
+    let r = center.dist_f64(&edge);
+    if r < 1e-9 {
+        return;
+    }
+    let (ux, uy) = ((ex - cx) / r, (ey - cy) / r);
+    let stroke = Stroke::new(1.0, color);
+
+    // Leader: centre→edge for a radius; the full diameter chord otherwise.
+    let near = if diameter {
+        (cx - ux * r, cy - uy * r)
+    } else {
+        (cx, cy)
+    };
+    let s_near = to_screen(near.0, near.1);
+    let s_edge = to_screen(ex, ey);
+    painter.line_segment([s_near, s_edge], stroke);
+
+    let style = &app.document.settings.dim_style;
+    let arrow_px = (style.arrow_size as f32 * app.view.zoom as f32).clamp(4.0, 60.0);
+    arrowhead(painter, s_edge, s_near, arrow_px, color);
+    if diameter {
+        arrowhead(painter, s_near, s_edge, arrow_px, color);
+    }
+
+    let value = if diameter { 2.0 * r } else { r };
+    let prefix = if diameter { "\u{2300}" } else { "R" };
+    let label = match ovr {
+        Some(t) => t.to_string(),
+        None => format!(
+            "{prefix}{}",
+            format_measure(value, app.document.settings.units, style.precision)
+        ),
+    };
+    let text_px = (style.text_height as f32 * app.view.zoom as f32).clamp(9.0, 200.0);
+    let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);
+    let galley = painter.layout_no_wrap(label, font_id, color);
+    // Place text just beyond the edge along the leader direction.
+    let tip = (ex + ux * (text_px as f64 * 0.4), ey + uy * (text_px as f64 * 0.4));
+    let st = to_screen(tip.0, tip.1);
+    let off = if ux >= 0.0 {
+        egui::vec2(2.0, -galley.size().y * 0.5)
+    } else {
+        egui::vec2(-galley.size().x - 2.0, -galley.size().y * 0.5)
+    };
+    painter.galley(st + off, galley, color);
+}
+
 /// Filled arrowhead at `tip`, pointing along `from`→`tip`, `size` px long.
 fn arrowhead(
     painter: &egui::Painter,
@@ -994,14 +1258,11 @@ fn arrowhead(
     ));
 }
 
-/// Format a measured length with the document's unit suffix.
-fn format_measure(value: f64, units: eiderflat_document::Units) -> String {
-    let s = units.short_name();
-    if s.is_empty() {
-        format!("{value:.2}")
-    } else {
-        format!("{value:.2} {s}")
-    }
+/// Format a measured length with the document's unit suffix, to `prec` decimals.
+/// Thin wrapper over [`eiderflat_document::Units::format_measure`], the shared
+/// implementation used by both the renderer and the exporters.
+fn format_measure(value: f64, units: eiderflat_document::Units, prec: usize) -> String {
+    units.format_measure(value, prec)
 }
 
 pub(super) fn corner_glass_frame() -> egui::Frame {

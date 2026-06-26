@@ -1,5 +1,8 @@
 use eiderflat_document::{Document, EntityId, EntityKind};
-use eiderflat_geometry::{BoundingBox, Curve, CurveSegment, LineSeg, Point2d, intersect};
+use eiderflat_geometry::{
+    BoundingBox, Curve, CurveSegment, LineSeg, Point2d, intersect,
+    point_segment_dist as point_seg_dist,
+};
 
 pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
     for e in doc.editable_entities().rev() {
@@ -33,6 +36,53 @@ pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
                     return Some(e.id);
                 }
             }
+            EntityKind::OrthoDim {
+                p1, p2, line, vertical, ..
+            } => {
+                let (a, b) = (p1.to_f64(), p2.to_f64());
+                let (lx, ly) = line.to_f64();
+                let (d1, d2) = if *vertical {
+                    ((lx, a.1), (lx, b.1))
+                } else {
+                    ((a.0, ly), (b.0, ly))
+                };
+                if point_seg_dist((x, y), a, d1) <= tol
+                    || point_seg_dist((x, y), b, d2) <= tol
+                    || point_seg_dist((x, y), d1, d2) <= tol
+                {
+                    return Some(e.id);
+                }
+            }
+            EntityKind::AngularDim {
+                center, p1, p2, line, ..
+            } => {
+                let c = center.to_f64();
+                let r = line.dist_f64(center);
+                let d = ((x - c.0).powi(2) + (y - c.1).powi(2)).sqrt();
+                if point_seg_dist((x, y), c, p1.to_f64()) <= tol
+                    || point_seg_dist((x, y), c, p2.to_f64()) <= tol
+                    || (d - r).abs() <= tol
+                {
+                    return Some(e.id);
+                }
+            }
+            EntityKind::RadialDim {
+                center,
+                edge,
+                diameter,
+                ..
+            } => {
+                let c = center.to_f64();
+                let ed = edge.to_f64();
+                let near = if *diameter {
+                    (2.0 * c.0 - ed.0, 2.0 * c.1 - ed.1)
+                } else {
+                    c
+                };
+                if point_seg_dist((x, y), near, ed) <= tol {
+                    return Some(e.id);
+                }
+            }
             EntityKind::Hatch {
                 boundary, holes, ..
             } if crate::hatch::region_contains(boundary, holes, x, y) => return Some(e.id),
@@ -40,19 +90,6 @@ pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
         }
     }
     None
-}
-
-/// Distance from point `p` to segment `a`–`b`.
-fn point_seg_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let len_sq = dx * dx + dy * dy;
-    let t = if len_sq < 1e-20 {
-        0.0
-    } else {
-        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len_sq).clamp(0.0, 1.0)
-    };
-    let (fx, fy) = (a.0 + t * dx, a.1 + t * dy);
-    ((p.0 - fx).powi(2) + (p.1 - fy).powi(2)).sqrt()
 }
 
 /// Hit-test an aligned dimension: its extension lines, its dimension line, and
@@ -210,6 +247,7 @@ mod tests {
             p2: pt(10, 0),
             line: pt(0, 4),
             height: 1.0,
+            override_text: None,
         });
         // On the dimension line (y≈4) → hit.
         assert_eq!(pick_at(&doc, 5.0, 4.0, 0.2), Some(id));

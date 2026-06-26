@@ -35,10 +35,56 @@ pub fn export_svg(doc: &Document) -> String {
         if let Some(path) = entity_to_svg(&e.kind, &fx, &fy, &stroke) {
             s.push_str(&path);
             s.push('\n');
+        } else if let Some(prims) = crate::dim::dimension_primitives(
+            &e.kind,
+            &doc.settings.dim_style,
+            doc.settings.units,
+        ) {
+            s.push_str(&dimension_to_svg(&prims, &fx, &fy, &stroke));
         }
     }
     s.push_str("</svg>\n");
     s
+}
+
+/// Emit a decomposed dimension as SVG `<line>`s plus a `<text>` label.
+fn dimension_to_svg(
+    prims: &crate::dim::DimPrimitives,
+    fx: &impl Fn(f64) -> f64,
+    fy: &impl Fn(f64) -> f64,
+    stroke: &str,
+) -> String {
+    let mut out = String::new();
+    let style = format!("fill=\"none\" stroke=\"{}\" stroke-width=\"0.25\"", stroke);
+    for (a, b) in &prims.segs {
+        out.push_str(&format!(
+            "  <line x1=\"{:.6}\" y1=\"{:.6}\" x2=\"{:.6}\" y2=\"{:.6}\" {}/>\n",
+            fx(a.x),
+            fy(a.y),
+            fx(b.x),
+            fy(b.y),
+            style
+        ));
+    }
+    if let Some(t) = &prims.text {
+        let (tx, ty) = (fx(t.anchor.x), fy(t.anchor.y));
+        let transform = if t.rotation_deg.abs() > 1e-6 {
+            // SVG y-axis points down, so the on-screen rotation negates.
+            format!(" transform=\"rotate({:.4} {:.6} {:.6})\"", -t.rotation_deg, tx, ty)
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "  <text x=\"{:.6}\" y=\"{:.6}\" font-size=\"{:.6}\" fill=\"{}\" text-anchor=\"middle\"{}>{}</text>\n",
+            tx,
+            ty,
+            t.height,
+            stroke,
+            transform,
+            xml_escape(&t.content)
+        ));
+    }
+    out
 }
 
 fn stroke_for(doc: &Document, e: &eiderflat_document::Entity) -> String {
@@ -635,6 +681,31 @@ mod tests {
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<line"));
         assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn exports_dimensions_as_lines_and_text() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::OrthoDim {
+            p1: pt(0, 0),
+            p2: pt(10, 0),
+            line: pt(0, 4),
+            vertical: false,
+            height: 2.5,
+            override_text: None,
+        });
+        doc.add(EntityKind::RadialDim {
+            center: pt(0, 0),
+            edge: pt(5, 0),
+            diameter: true,
+            height: 2.5,
+            override_text: None,
+        });
+        let svg = export_svg(&doc);
+        // Dimension geometry + value text both make it into the SVG.
+        assert!(svg.contains("<line"), "dimension lines exported");
+        assert!(svg.contains("<text"), "dimension value text exported");
+        assert!(svg.contains('\u{2300}'), "diameter symbol in the label");
     }
 
     #[test]

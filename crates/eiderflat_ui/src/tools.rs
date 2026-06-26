@@ -52,6 +52,32 @@ pub enum Tool {
         p1: Option<Point2d>,
         p2: Option<Point2d>,
     },
+    /// Axis-locked linear dimension (horizontal when `vertical` is false): pick
+    /// two points, then the dimension-line offset.
+    DimOrtho {
+        vertical: bool,
+        p1: Option<Point2d>,
+        p2: Option<Point2d>,
+    },
+    /// Angular dimension: pick the vertex, a point on each ray, then the arc
+    /// location. `pts` accumulates [vertex, ray1, ray2]; the 4th click places it.
+    DimAngular {
+        pts: Vec<Point2d>,
+    },
+    /// Angular dimension from two picked lines: pick line A, pick line B (their
+    /// intersection is the vertex), then click to place the dimension arc. `geom`
+    /// holds (vertex, ray-point-A, ray-point-B) once both lines are picked.
+    DimAngularLines {
+        a: Option<EntityId>,
+        geom: Option<(Point2d, Point2d, Point2d)>,
+    },
+    /// Radius/diameter dimension: pick a circle or arc (sets `center`), then click
+    /// to aim the leader. `diameter` chooses ⌀ vs R.
+    DimRadial {
+        diameter: bool,
+        center: Option<Point2d>,
+        radius: f64,
+    },
     Ellipse {
         center: Option<Point2d>,
         axis_end: Option<Point2d>,
@@ -150,6 +176,12 @@ impl Tool {
             Tool::CircleTtt { .. } => "CIRCLE TTT",
             Tool::TangentLine { .. } => "TANGENT",
             Tool::Dimension { .. } => "DIMENSION",
+            Tool::DimOrtho { vertical: true, .. } => "DIM VERTICAL",
+            Tool::DimOrtho { .. } => "DIM HORIZONTAL",
+            Tool::DimAngular { .. } => "DIM ANGULAR",
+            Tool::DimAngularLines { .. } => "DIM ANGULAR (2 lines)",
+            Tool::DimRadial { diameter: true, .. } => "DIM DIAMETER",
+            Tool::DimRadial { .. } => "DIM RADIUS",
             Tool::Ellipse { .. } => "ELLIPSE",
             Tool::Rectangle { .. } => "RECTANGLE",
             Tool::Move { .. } => "MOVE",
@@ -189,6 +221,8 @@ impl Tool {
                 | Tool::CircleTtr { .. }
                 | Tool::CircleTtt { .. }
                 | Tool::TangentLine { .. }
+                | Tool::DimRadial { center: None, .. }
+                | Tool::DimAngularLines { geom: None, .. }
         )
     }
 
@@ -338,9 +372,121 @@ impl Tool {
                         p2: b,
                         line: p,
                         height: 2.5,
+                        override_text: None,
                     }])
                 }
             },
+
+            Tool::DimOrtho { vertical, p1, p2 } => {
+                let vert = *vertical;
+                match (*p1, *p2) {
+                    (None, _) => {
+                        *p1 = Some(p);
+                        ToolEvent::Pending
+                    }
+                    (Some(_), None) => {
+                        *p2 = Some(p);
+                        ToolEvent::Pending
+                    }
+                    (Some(a), Some(b)) => {
+                        *self = Tool::DimOrtho {
+                            vertical: vert,
+                            p1: None,
+                            p2: None,
+                        };
+                        ToolEvent::Create(vec![EntityKind::OrthoDim {
+                            p1: a,
+                            p2: b,
+                            line: p,
+                            vertical: vert,
+                            height: 2.5,
+                            override_text: None,
+                        }])
+                    }
+                }
+            }
+
+            Tool::DimAngular { pts } => {
+                // Collect vertex, ray-1 point, ray-2 point; the 4th click places
+                // the dimension arc and commits. Snapshot first so the `*self`
+                // reassignment doesn't overlap the `pts` borrow.
+                let ready = (pts.len() >= 3).then(|| (pts[0], pts[1], pts[2]));
+                match ready {
+                    None => {
+                        pts.push(p);
+                        ToolEvent::Pending
+                    }
+                    Some((center, a, b)) => {
+                        *self = Tool::DimAngular { pts: vec![] };
+                        ToolEvent::Create(vec![EntityKind::AngularDim {
+                            center,
+                            p1: a,
+                            p2: b,
+                            line: p,
+                            height: 2.5,
+                            override_text: None,
+                        }])
+                    }
+                }
+            }
+
+            Tool::DimAngularLines { geom, .. } => {
+                // Both lines are picked in `handle_modify_click`; this free-point
+                // click places the arc and commits.
+                match *geom {
+                    Some((center, a, b)) => {
+                        *self = Tool::DimAngularLines {
+                            a: None,
+                            geom: None,
+                        };
+                        ToolEvent::Create(vec![EntityKind::AngularDim {
+                            center,
+                            p1: a,
+                            p2: b,
+                            line: p,
+                            height: 2.5,
+                            override_text: None,
+                        }])
+                    }
+                    None => ToolEvent::Pending,
+                }
+            }
+
+            Tool::DimRadial {
+                diameter,
+                center,
+                radius,
+            } => {
+                // The circle/arc pick is handled in `handle_modify_click`, which
+                // fills in `center`/`radius`. This click aims the leader at `p`
+                // (a point on the circle in the cursor direction) and commits.
+                let snap = center.map(|c| (c, *radius, *diameter));
+                match snap {
+                    Some((c, r, dia)) => {
+                        let (cx, cy) = c.to_f64();
+                        let (dx, dy) = (p.x - cx, p.y - cy);
+                        let len = (dx * dx + dy * dy).sqrt();
+                        let edge = if len > 1e-9 {
+                            Point2d::from_f64(cx + dx / len * r, cy + dy / len * r)
+                        } else {
+                            Point2d::from_f64(cx + r, cy)
+                        };
+                        *self = Tool::DimRadial {
+                            diameter: dia,
+                            center: None,
+                            radius: 0.0,
+                        };
+                        ToolEvent::Create(vec![EntityKind::RadialDim {
+                            center: c,
+                            edge,
+                            diameter: dia,
+                            height: 2.5,
+                            override_text: None,
+                        }])
+                    }
+                    None => ToolEvent::Pending,
+                }
+            }
 
             Tool::CircleThreePoint { pts } => {
                 pts.push(p);
@@ -569,6 +715,19 @@ impl Tool {
                 *p1 = None;
                 *p2 = None;
             }
+            Tool::DimOrtho { p1, p2, .. } => {
+                *p1 = None;
+                *p2 = None;
+            }
+            Tool::DimAngular { pts } => pts.clear(),
+            Tool::DimAngularLines { a, geom } => {
+                *a = None;
+                *geom = None;
+            }
+            Tool::DimRadial { center, radius, .. } => {
+                *center = None;
+                *radius = 0.0;
+            }
             Tool::Ellipse { center, axis_end } => {
                 *center = None;
                 *axis_end = None;
@@ -612,6 +771,10 @@ impl Tool {
             Tool::CircleTtt { picks } => !picks.is_empty(),
             Tool::TangentLine { first } => first.is_some(),
             Tool::Dimension { p1, .. } => p1.is_some(),
+            Tool::DimOrtho { p1, .. } => p1.is_some(),
+            Tool::DimAngular { pts } => !pts.is_empty(),
+            Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
+            Tool::DimRadial { center, .. } => center.is_some(),
             Tool::Ellipse { center, .. } => center.is_some(),
             Tool::Rectangle { first } => first.is_some(),
             Tool::Move { base, .. } | Tool::Copy { base, .. } => base.is_some(),
@@ -821,6 +984,10 @@ impl Tool {
                 _ => None,
             },
             Tool::Dimension { p1, p2 } => (*p2).or(*p1),
+            Tool::DimOrtho { p1, p2, .. } => (*p2).or(*p1),
+            Tool::DimAngular { pts } => pts.last().cloned(),
+            Tool::DimAngularLines { geom, .. } => geom.map(|(v, _, _)| v),
+            Tool::DimRadial { center, .. } => *center,
             Tool::Select => None,
         }
     }

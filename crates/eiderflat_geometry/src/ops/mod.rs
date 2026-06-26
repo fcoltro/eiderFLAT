@@ -11,7 +11,7 @@ pub use distance::{
 };
 pub use intersect::{
     CurveIntersection, intersect, intersect_circle_circle, intersect_general,
-    intersect_line_circle, intersect_line_line,
+    intersect_line_circle, intersect_line_line, intersect_lines_unbounded,
 };
 pub use offset::{offset_curve, refit_nurbs_subcurve};
 pub use split_reverse::{reverse_curve, split_curve};

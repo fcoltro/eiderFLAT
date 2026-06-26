@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "eiderflat_app"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "eframe",
  "eiderflat_geometry",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "eiderflat_boolean"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "eiderflat_geometry",
  "robust",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "eiderflat_cad"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "eiderflat_boolean",
  "eiderflat_document",
@@ -967,18 +967,18 @@ dependencies = [
 
 [[package]]
 name = "eiderflat_document"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "eiderflat_geometry",
 ]
 
 [[package]]
 name = "eiderflat_geometry"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 
 [[package]]
 name = "eiderflat_io"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "eiderflat_document",
  "eiderflat_geometry",
@@ -986,14 +986,14 @@ dependencies = [
 
 [[package]]
 name = "eiderflat_spatial"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "eiderflat_geometry",
 ]
 
 [[package]]
 name = "eiderflat_ui"
-version = "0.1.4-alpha"
+version = "0.1.5-alpha"
 dependencies = [
  "egui",
  "eiderflat_cad",

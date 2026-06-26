@@ -19,10 +19,11 @@ pub fn to_string(doc: &Document) -> String {
     s.push_str(&format!("SNAP {}\n", doc.settings.snap_spacing));
     let ds = &doc.settings.dim_style;
     s.push_str(&format!(
-        "DIMSTYLE {} {} {}\n",
+        "DIMSTYLE {} {} {} {}\n",
         ds.text_height,
         ds.arrow_size,
-        ds.font.as_deref().map(esc).unwrap_or_else(|| "-".into())
+        ds.font.as_deref().map(esc).unwrap_or_else(|| "-".into()),
+        ds.precision
     ));
 
     for lt in &doc.line_types {
@@ -176,14 +177,68 @@ fn write_entity(s: &mut String, e: &Entity) {
             p2,
             line,
             height,
+            override_text,
         } => s.push_str(&format!(
-            "E DIM {} {} {} {} {} {}\n",
+            "E DIM {} {} {} {} {} {} {}\n",
             layer,
             color,
             pt(p1),
             pt(p2),
             pt(line),
-            height
+            height,
+            dim_override(override_text)
+        )),
+        EntityKind::OrthoDim {
+            p1,
+            p2,
+            line,
+            vertical,
+            height,
+            override_text,
+        } => s.push_str(&format!(
+            "E DIMORTHO {} {} {} {} {} {} {} {}\n",
+            layer,
+            color,
+            pt(p1),
+            pt(p2),
+            pt(line),
+            *vertical as u8,
+            height,
+            dim_override(override_text)
+        )),
+        EntityKind::AngularDim {
+            center,
+            p1,
+            p2,
+            line,
+            height,
+            override_text,
+        } => s.push_str(&format!(
+            "E DIMANG {} {} {} {} {} {} {} {}\n",
+            layer,
+            color,
+            pt(center),
+            pt(p1),
+            pt(p2),
+            pt(line),
+            height,
+            dim_override(override_text)
+        )),
+        EntityKind::RadialDim {
+            center,
+            edge,
+            diameter,
+            height,
+            override_text,
+        } => s.push_str(&format!(
+            "E DIMRAD {} {} {} {} {} {} {}\n",
+            layer,
+            color,
+            pt(center),
+            pt(edge),
+            *diameter as u8,
+            height,
+            dim_override(override_text)
         )),
         _ => {}
     }
@@ -274,6 +329,10 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                     None | Some("-") => None,
                     Some(t) => Some(unesc(t)),
                 };
+                // Precision is optional (absent in older files → keep the default).
+                if let Some(p) = tok.next().and_then(|v| v.parse().ok()) {
+                    ds.precision = p;
+                }
             }
             Some("LT") => {
                 if let Some(lt) = parse_lt(&mut tok) {
@@ -381,20 +440,69 @@ fn parse_entity<'a>(
             let p2 = parse_pt(tok.next());
             let line = parse_pt(tok.next());
             let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
+            let override_text = parse_dim_override(tok);
             Some(EntityKind::Dimension {
                 p1,
                 p2,
                 line,
                 height,
+                override_text,
+            })
+        }
+        "DIMORTHO" => {
+            let p1 = parse_pt(tok.next());
+            let p2 = parse_pt(tok.next());
+            let line = parse_pt(tok.next());
+            let vertical = tok.next().map(|v| v == "1").unwrap_or(false);
+            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
+            let override_text = parse_dim_override(tok);
+            Some(EntityKind::OrthoDim {
+                p1,
+                p2,
+                line,
+                vertical,
+                height,
+                override_text,
+            })
+        }
+        "DIMANG" => {
+            let center = parse_pt(tok.next());
+            let p1 = parse_pt(tok.next());
+            let p2 = parse_pt(tok.next());
+            let line = parse_pt(tok.next());
+            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
+            let override_text = parse_dim_override(tok);
+            Some(EntityKind::AngularDim {
+                center,
+                p1,
+                p2,
+                line,
+                height,
+                override_text,
+            })
+        }
+        "DIMRAD" => {
+            let center = parse_pt(tok.next());
+            let edge = parse_pt(tok.next());
+            let diameter = tok.next().map(|v| v == "1").unwrap_or(false);
+            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
+            let override_text = parse_dim_override(tok);
+            Some(EntityKind::RadialDim {
+                center,
+                edge,
+                diameter,
+                height,
+                override_text,
             })
         }
         "POLY" => {
             let count: usize = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0);
             let mut segs = Vec::new();
             for _ in 0..count {
-                if let Some(segline) = lines.next()
-                    && let Some(seg) = parse_segment(segline.trim())
-                {
+                // Stop at end-of-input rather than spinning `count` times on a
+                // truncated or corrupt file (a huge count must not hang the load).
+                let Some(segline) = lines.next() else { break };
+                if let Some(seg) = parse_segment(segline.trim()) {
                     segs.push(seg);
                 }
             }
@@ -409,9 +517,9 @@ fn parse_entity<'a>(
             let read_segs = |lines: &mut std::iter::Peekable<std::str::Lines>, n: usize| {
                 let mut v = Vec::new();
                 for _ in 0..n {
-                    if let Some(line) = lines.next()
-                        && let Some(seg) = parse_segment(line.trim())
-                    {
+                    // Stop at end-of-input so a corrupt segment count can't hang.
+                    let Some(line) = lines.next() else { break };
+                    if let Some(seg) = parse_segment(line.trim()) {
                         v.push(seg);
                     }
                 }
@@ -495,10 +603,14 @@ fn parse_control_data<'a, I: Iterator<Item = &'a str>>(
     tok: &mut I,
 ) -> Option<(Vec<Point2d>, Vec<f64>)> {
     let n: usize = tok.next().and_then(|v| v.parse().ok())?;
-    let mut points = Vec::with_capacity(n);
-    let mut weights = Vec::with_capacity(n);
+    // Cap the pre-allocation: a corrupt count must not trigger a huge allocation.
+    // The real data is bounded by the tokens present on the line, so we stop as
+    // soon as a control point token is missing.
+    let mut points = Vec::with_capacity(n.min(1024));
+    let mut weights = Vec::with_capacity(n.min(1024));
     for _ in 0..n {
-        points.push(parse_pt(tok.next()));
+        let Some(p) = tok.next() else { break };
+        points.push(parse_pt(Some(p)));
         weights.push(parse_num(tok.next().unwrap_or("1")));
     }
     (points.len() >= 2 && points.len() == weights.len() && weights.iter().all(|&w| w > 0.0))
@@ -672,6 +784,22 @@ fn esc(s: &str) -> String {
     }
     s.replace('\\', "\\\\").replace(' ', "\\s")
 }
+
+/// Serialise an optional dimension text override: `-` for none, else escaped.
+fn dim_override(o: &Option<String>) -> String {
+    match o {
+        None => "-".into(),
+        Some(t) => esc(t),
+    }
+}
+
+/// Parse a trailing dimension override token (`-`/absent → none).
+fn parse_dim_override<'a>(tok: &mut impl Iterator<Item = &'a str>) -> Option<String> {
+    match tok.next() {
+        None | Some("-") => None,
+        Some(t) => Some(unesc(t)),
+    }
+}
 fn unesc(s: &str) -> String {
     if s == "_" {
         return String::new();
@@ -788,6 +916,7 @@ mod tests {
             p2: pt_i(10, 0),
             line: pt_i(0, 3),
             height: 2.5,
+            override_text: None,
         });
         let doc2 = from_string(&to_string(&doc)).unwrap();
         let e = doc2.iter().next().expect("one entity");
@@ -797,6 +926,7 @@ mod tests {
                 p2,
                 line,
                 height,
+                ..
             } => {
                 assert_eq!(*p1, pt_i(0, 0));
                 assert_eq!(*p2, pt_i(10, 0));
@@ -805,6 +935,62 @@ mod tests {
             }
             other => panic!("expected a Dimension, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn roundtrip_angular_and_radial_dimensions() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::AngularDim {
+            center: pt_i(0, 0),
+            p1: pt_i(10, 0),
+            p2: pt_i(0, 10),
+            line: pt_i(5, 5),
+            height: 2.5,
+            override_text: None,
+        });
+        doc.add(EntityKind::RadialDim {
+            center: pt_i(3, 4),
+            edge: pt_i(8, 4),
+            diameter: true,
+            height: 2.5,
+            override_text: None,
+        });
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.len(), 2);
+        let ang = doc2
+            .iter()
+            .any(|e| matches!(&e.kind, EntityKind::AngularDim { center, .. } if *center == pt_i(0, 0)));
+        let rad = doc2.iter().any(
+            |e| matches!(&e.kind, EntityKind::RadialDim { diameter, edge, .. } if *diameter && *edge == pt_i(8, 4)),
+        );
+        assert!(ang, "angular dimension survived the round-trip");
+        assert!(rad, "radial (diameter) dimension survived the round-trip");
+    }
+
+    #[test]
+    fn roundtrip_dimension_text_override() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Dimension {
+            p1: pt_i(0, 0),
+            p2: pt_i(10, 0),
+            line: pt_i(0, 3),
+            height: 2.5,
+            override_text: Some("≈ 10 cm".into()),
+        });
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        let ovr = doc2.iter().find_map(|e| match &e.kind {
+            EntityKind::Dimension { override_text, .. } => override_text.clone(),
+            _ => None,
+        });
+        assert_eq!(ovr.as_deref(), Some("≈ 10 cm"), "override text survives with spaces");
+    }
+
+    #[test]
+    fn roundtrip_dimstyle_precision() {
+        let mut doc = Document::new();
+        doc.settings.dim_style.precision = 4;
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.settings.dim_style.precision, 4);
     }
 
     #[test]
@@ -940,6 +1126,21 @@ mod tests {
             }
             other => panic!("expected Hatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn corrupt_counts_do_not_hang_or_oom() {
+        // A control-point count far larger than the data present must not trigger a
+        // huge allocation or spin: parsing stops at the end of the available tokens.
+        let nurbs = format!("{} {}\nE NURBS 0 bylayer 100000000 0;0 1 5;5 1\n", MAGIC, VERSION);
+        let doc = from_string(&nurbs).expect("loads without hanging");
+        assert_eq!(doc.len(), 1);
+
+        // A POLY/HATCH segment count larger than the lines present must likewise
+        // stop at end-of-input rather than looping the full declared count.
+        let poly = format!("{} {}\nE POLY 0 bylayer 100000000\nSEG LINE 0;0 4;0\n", MAGIC, VERSION);
+        let doc = from_string(&poly).expect("loads without hanging");
+        assert_eq!(doc.len(), 1);
     }
 
     #[test]

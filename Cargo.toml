@@ -10,3 +10,35 @@ members = [
     "crates/eiderflat_ui",
     "apps/eiderflat_app",
 ]
+
+# Shared package metadata — every crate inherits these via `field.workspace = true`,
+# so the version/edition/license are set in one place at release time.
+[workspace.package]
+version = "0.1.5-alpha"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Single source of truth for dependency versions. Internal crates are referenced
+# by path here too, so a crate just writes `eiderflat_geometry.workspace = true`.
+[workspace.dependencies]
+eiderflat_geometry = { path = "crates/eiderflat_geometry" }
+eiderflat_spatial = { path = "crates/eiderflat_spatial" }
+eiderflat_boolean = { path = "crates/eiderflat_boolean" }
+eiderflat_document = { path = "crates/eiderflat_document" }
+eiderflat_cad = { path = "crates/eiderflat_cad" }
+eiderflat_io = { path = "crates/eiderflat_io" }
+eiderflat_ui = { path = "crates/eiderflat_ui" }
+egui = "0.34"
+eframe = "0.34"
+robust = "1"
+rfd = "0.17"
+fontdb = "0.23"
+ttf-parser = "0.25"
+resvg = { version = "0.47", default-features = false }
+winresource = "0.1"
+
+# Lints applied across the whole workspace. The geometry kernel and everything
+# built on it are 100% safe Rust — forbid `unsafe` so that stays true.
+[workspace.lints.rust]
+unsafe_code = "forbid"

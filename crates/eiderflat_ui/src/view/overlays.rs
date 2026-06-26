@@ -49,6 +49,62 @@ pub(super) fn curvature_comb(
         painter.add(egui::Shape::line(tips, envelope));
     }
 }
+/// A compact, non-editable readout pinned just below-right of the cursor while a
+/// transform tool (Move/Copy/Rotate/Scale) is mid-operation. These tools have no
+/// dynamic-input HUD, so without this there is no live feedback on how far you've
+/// moved or how far you've turned.
+pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::Pos2) {
+    let (cx, cy) = app.cursor_world;
+    let text = match &app.tool {
+        Tool::Move { base: Some(b), .. } | Tool::Copy { base: Some(b), .. } => {
+            let (bx, by) = b.to_f64();
+            let (dx, dy) = (cx - bx, cy - by);
+            Some(format!("Δ {:.2}, {:.2}   {:.2}", dx, dy, (dx * dx + dy * dy).sqrt()))
+        }
+        Tool::Rotate { base: Some(b), .. } => {
+            let (bx, by) = b.to_f64();
+            let a = eiderflat_geometry::wrap_deg360((cy - by).atan2(cx - bx).to_degrees());
+            Some(format!("{:.1}°", a))
+        }
+        Tool::Scale {
+            base: Some(b),
+            reference,
+            ..
+        } => {
+            let (bx, by) = b.to_f64();
+            let d = ((cx - bx).powi(2) + (cy - by).powi(2)).sqrt();
+            match reference {
+                Some(r) if *r > 1e-9 => Some(format!("×{:.3}", d / r)),
+                _ => Some(format!("{:.2}", d)),
+            }
+        }
+        _ => None,
+    };
+    let Some(text) = text else { return };
+
+    let cur = app.view.world_to_screen(cx, cy);
+    let pos = pos2(origin.x + cur.0 as f32 + 18.0, origin.y + cur.1 as f32 + 16.0);
+    egui::Area::new(egui::Id::new("cursor_readout"))
+        .fixed_pos(pos)
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(Color32::from_rgba_unmultiplied(15, 19, 29, 200))
+                .stroke(Stroke::new(1.0, crate::theme::OUTLINE))
+                .corner_radius(crate::theme::tok::R_SM)
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .monospace()
+                            .size(12.0)
+                            .color(crate::theme::ACCENT_BRIGHT),
+                    );
+                });
+        });
+}
+
 pub(super) fn dyn_line_hud(
     ctx: &egui::Context,
     app: &mut AppState,
@@ -63,10 +119,7 @@ pub(super) fn dyn_line_hud(
     if let (true, Some((rx, ry))) = (app.dyn_on, line_ref) {
         let (cx, cy) = app.cursor_world;
         let live_len = ((cx - rx).powi(2) + (cy - ry).powi(2)).sqrt();
-        let mut live_ang = (cy - ry).atan2(cx - rx).to_degrees();
-        if live_ang < 0.0 {
-            live_ang += 360.0;
-        }
+        let live_ang = eiderflat_geometry::wrap_deg360((cy - ry).atan2(cx - rx).to_degrees());
 
         let len_id = egui::Id::new("dyn_len");
         let ang_id = egui::Id::new("dyn_ang");
@@ -304,7 +357,12 @@ pub(super) fn dyn_rect_hud(
             } else if let Ok(h) = ui_state.dyn_rect_height.trim().parse::<f64>() {
                 let w = ui_state.dyn_rect_width.trim().parse::<f64>().unwrap_or(0.0);
                 if h.abs() > 1e-9 && w.abs() > 1e-9 {
-                    app.place_tool_point(Point2d::from_f64(fx + w, fy + h));
+                    // Grow the rectangle toward whichever quadrant the cursor is
+                    // in, so the typed width/height never need a minus sign:
+                    // aim up-left and a "10 × 5" box is drawn up and to the left.
+                    let sx = if crx >= fx { 1.0 } else { -1.0 };
+                    let sy = if cry >= fy { 1.0 } else { -1.0 };
+                    app.place_tool_point(Point2d::from_f64(fx + w.abs() * sx, fy + h.abs() * sy));
                     ui_state.dyn_rect_active = false;
                     committed = true;
                 }

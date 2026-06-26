@@ -1,8 +1,11 @@
 [package]
-publish = false
 name = "eiderflat_geometry"
-version = "0.1.4-alpha"
-edition = "2024"
-license = "GPL-3.0-or-later"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
+
+[lints]
+workspace = true

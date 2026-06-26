@@ -58,6 +58,40 @@ pub enum EntityKind {
         p2: Point2d,
         line: Point2d,
         height: f64,
+        /// User text shown instead of the measured value when `Some`.
+        override_text: Option<String>,
+    },
+    /// Axis-locked linear dimension between two points. When `vertical` is false
+    /// it measures the horizontal distance `|x2 − x1|` with a horizontal dimension
+    /// line through `line.y`; when true, the vertical distance through `line.x`.
+    OrthoDim {
+        p1: Point2d,
+        p2: Point2d,
+        line: Point2d,
+        vertical: bool,
+        height: f64,
+        override_text: Option<String>,
+    },
+    /// Angular dimension at vertex `center`, measuring the angle between the rays
+    /// `center`→`p1` and `center`→`p2`. The dimension arc passes through `line`,
+    /// which sets the arc radius and which of the two angular sectors is labelled.
+    AngularDim {
+        center: Point2d,
+        p1: Point2d,
+        p2: Point2d,
+        line: Point2d,
+        height: f64,
+        override_text: Option<String>,
+    },
+    /// Radius (or diameter, when `diameter` is set) dimension of a circle/arc with
+    /// the given `center`; `edge` is a point on the circle that fixes the leader
+    /// direction and the measured radius (`|center → edge|`).
+    RadialDim {
+        center: Point2d,
+        edge: Point2d,
+        diameter: bool,
+        height: f64,
+        override_text: Option<String>,
     },
 }
 
@@ -107,17 +141,20 @@ impl Entity {
                 .iter()
                 .map(|c| c.bounding_box())
                 .reduce(|a, b| a.union(&b)),
-            EntityKind::Dimension { p1, p2, line, .. } => {
-                let pts = [p1.to_f64(), p2.to_f64(), line.to_f64()];
-                let (mut minx, mut miny) = pts[0];
-                let (mut maxx, mut maxy) = pts[0];
-                for (x, y) in pts {
-                    minx = minx.min(x);
-                    miny = miny.min(y);
-                    maxx = maxx.max(x);
-                    maxy = maxy.max(y);
-                }
-                Some(BoundingBox::from_corners(minx, miny, maxx, maxy))
+            EntityKind::Dimension { p1, p2, line, .. }
+            | EntityKind::OrthoDim { p1, p2, line, .. } => {
+                Some(bbox_of(&[p1.to_f64(), p2.to_f64(), line.to_f64()]))
+            }
+            EntityKind::AngularDim {
+                center, p1, p2, line, ..
+            } => Some(bbox_of(&[
+                center.to_f64(),
+                p1.to_f64(),
+                p2.to_f64(),
+                line.to_f64(),
+            ])),
+            EntityKind::RadialDim { center, edge, .. } => {
+                Some(bbox_of(&[center.to_f64(), edge.to_f64()]))
             }
         }
     }
@@ -170,11 +207,56 @@ impl Entity {
                 p2,
                 line,
                 height,
+                override_text,
             } => EntityKind::Dimension {
                 p1: t.apply_point(p1),
                 p2: t.apply_point(p2),
                 line: t.apply_point(line),
                 height: height * t.scale_factor(),
+                override_text: override_text.clone(),
+            },
+            EntityKind::OrthoDim {
+                p1,
+                p2,
+                line,
+                vertical,
+                height,
+                override_text,
+            } => EntityKind::OrthoDim {
+                p1: t.apply_point(p1),
+                p2: t.apply_point(p2),
+                line: t.apply_point(line),
+                vertical: *vertical,
+                height: height * t.scale_factor(),
+                override_text: override_text.clone(),
+            },
+            EntityKind::AngularDim {
+                center,
+                p1,
+                p2,
+                line,
+                height,
+                override_text,
+            } => EntityKind::AngularDim {
+                center: t.apply_point(center),
+                p1: t.apply_point(p1),
+                p2: t.apply_point(p2),
+                line: t.apply_point(line),
+                height: height * t.scale_factor(),
+                override_text: override_text.clone(),
+            },
+            EntityKind::RadialDim {
+                center,
+                edge,
+                diameter,
+                height,
+                override_text,
+            } => EntityKind::RadialDim {
+                center: t.apply_point(center),
+                edge: t.apply_point(edge),
+                diameter: *diameter,
+                height: height * t.scale_factor(),
+                override_text: override_text.clone(),
             },
         };
     }
@@ -192,6 +274,19 @@ impl Entity {
             None
         }
     }
+}
+
+/// Axis-aligned bounding box covering a set of points (at least one).
+fn bbox_of(pts: &[(f64, f64)]) -> BoundingBox {
+    let (mut minx, mut miny) = pts[0];
+    let (mut maxx, mut maxy) = pts[0];
+    for &(x, y) in pts {
+        minx = minx.min(x);
+        miny = miny.min(y);
+        maxx = maxx.max(x);
+        maxy = maxy.max(y);
+    }
+    BoundingBox::from_corners(minx, miny, maxx, maxy)
 }
 
 fn transform_pattern(p: &HatchPattern, t: &Transform2d) -> HatchPattern {

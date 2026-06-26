@@ -109,6 +109,42 @@ pub fn list_entity(doc: &Document, id: EntityId) -> Option<String> {
         EntityKind::Dimension { p1, p2, .. } => {
             format!("DIMENSION  length={:.4}", p1.dist_f64(p2))
         }
+        EntityKind::OrthoDim {
+            p1, p2, vertical, ..
+        } => {
+            let (a, b) = (p1.to_f64(), p2.to_f64());
+            let d = if *vertical {
+                (b.1 - a.1).abs()
+            } else {
+                (b.0 - a.0).abs()
+            };
+            let axis = if *vertical { "vertical" } else { "horizontal" };
+            format!("DIMENSION ({axis})  length={d:.4}")
+        }
+        EntityKind::AngularDim {
+            center, p1, p2, ..
+        } => {
+            let (cx, cy) = center.to_f64();
+            let (a1x, a1y) = p1.to_f64();
+            let (a2x, a2y) = p2.to_f64();
+            let a = eiderflat_geometry::wrap_deg360(
+                ((a2y - cy).atan2(a2x - cx) - (a1y - cy).atan2(a1x - cx)).to_degrees(),
+            );
+            format!("ANGULAR DIM  angle={a:.3}°")
+        }
+        EntityKind::RadialDim {
+            center,
+            edge,
+            diameter,
+            ..
+        } => {
+            let r = center.dist_f64(edge);
+            if *diameter {
+                format!("DIAMETER DIM  diameter={:.4}", 2.0 * r)
+            } else {
+                format!("RADIUS DIM  radius={r:.4}")
+            }
+        }
     };
     Some(format!("[{}] layer={}  {}", id.0, layer_name, geom))
 }

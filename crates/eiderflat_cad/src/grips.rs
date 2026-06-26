@@ -107,11 +107,24 @@ pub fn grips_for(kind: &EntityKind) -> Vec<Grip> {
                 Grip::new(GripRole::Rotation, rot),
             ]
         }
-        EntityKind::Dimension { p1, p2, line, .. } => vec![
+        EntityKind::Dimension { p1, p2, line, .. }
+        | EntityKind::OrthoDim { p1, p2, line, .. } => vec![
             Grip::new(GripRole::Endpoint(0), *p1),
             Grip::new(GripRole::Endpoint(1), *p2),
             // The offset handle that slides the dimension line.
             Grip::new(GripRole::Vertex(2), *line),
+        ],
+        EntityKind::AngularDim {
+            center, p1, p2, line, ..
+        } => vec![
+            Grip::new(GripRole::Vertex(0), *center),
+            Grip::new(GripRole::Endpoint(1), *p1),
+            Grip::new(GripRole::Endpoint(2), *p2),
+            Grip::new(GripRole::Vertex(3), *line),
+        ],
+        EntityKind::RadialDim { center, edge, .. } => vec![
+            Grip::new(GripRole::Vertex(0), *center),
+            Grip::new(GripRole::Endpoint(1), *edge),
         ],
         _ => Vec::new(),
     }
@@ -273,7 +286,11 @@ pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
 
         (
             EntityKind::Dimension {
-                p2, line, height, ..
+                p2,
+                line,
+                height,
+                override_text,
+                ..
             },
             GripRole::Endpoint(0),
         ) => EntityKind::Dimension {
@@ -281,10 +298,15 @@ pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
             p2: *p2,
             line: *line,
             height: *height,
+            override_text: override_text.clone(),
         },
         (
             EntityKind::Dimension {
-                p1, line, height, ..
+                p1,
+                line,
+                height,
+                override_text,
+                ..
             },
             GripRole::Endpoint(1),
         ) => EntityKind::Dimension {
@@ -292,13 +314,104 @@ pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
             p2: to,
             line: *line,
             height: *height,
+            override_text: override_text.clone(),
         },
-        (EntityKind::Dimension { p1, p2, height, .. }, GripRole::Vertex(2)) => {
+        (
             EntityKind::Dimension {
-                p1: *p1,
-                p2: *p2,
-                line: to,
+                p1,
+                p2,
+                height,
+                override_text,
+                ..
+            },
+            GripRole::Vertex(2),
+        ) => EntityKind::Dimension {
+            p1: *p1,
+            p2: *p2,
+            line: to,
+            height: *height,
+            override_text: override_text.clone(),
+        },
+
+        (
+            EntityKind::OrthoDim {
+                p1,
+                p2,
+                line,
+                vertical,
+                height,
+                override_text,
+            },
+            role,
+        ) => {
+            let (mut a, mut b, mut l) = (*p1, *p2, *line);
+            match role {
+                GripRole::Endpoint(0) => a = to,
+                GripRole::Endpoint(1) => b = to,
+                GripRole::Vertex(2) => l = to,
+                _ => {}
+            }
+            EntityKind::OrthoDim {
+                p1: a,
+                p2: b,
+                line: l,
+                vertical: *vertical,
                 height: *height,
+                override_text: override_text.clone(),
+            }
+        }
+
+        (
+            EntityKind::AngularDim {
+                center,
+                p1,
+                p2,
+                line,
+                height,
+                override_text,
+            },
+            role,
+        ) => {
+            let (mut c, mut a, mut b, mut l) = (*center, *p1, *p2, *line);
+            match role {
+                GripRole::Vertex(0) => c = to,
+                GripRole::Endpoint(1) => a = to,
+                GripRole::Endpoint(2) => b = to,
+                GripRole::Vertex(3) => l = to,
+                _ => {}
+            }
+            EntityKind::AngularDim {
+                center: c,
+                p1: a,
+                p2: b,
+                line: l,
+                height: *height,
+                override_text: override_text.clone(),
+            }
+        }
+
+        (
+            EntityKind::RadialDim {
+                center,
+                edge,
+                diameter,
+                height,
+                override_text,
+            },
+            role,
+        ) => {
+            let (mut c, mut e) = (*center, *edge);
+            match role {
+                GripRole::Vertex(0) => c = to,
+                GripRole::Endpoint(1) => e = to,
+                _ => {}
+            }
+            EntityKind::RadialDim {
+                center: c,
+                edge: e,
+                diameter: *diameter,
+                height: *height,
+                override_text: override_text.clone(),
             }
         }
 

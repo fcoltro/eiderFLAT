@@ -43,6 +43,16 @@ pub(super) fn handle_shortcuts(ctx: &Context, app: &mut AppState, ui_state: &mut
         if ctrl && ctx.input(|i| i.key_pressed(egui::Key::A)) {
             app.execute(Command::SelectAll);
         }
+        // Clipboard: Ctrl+C copy, Ctrl+X cut, Ctrl+V paste (at the cursor).
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::C)) {
+            app.clipboard_copy();
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::X)) {
+            app.clipboard_cut();
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::V)) {
+            app.clipboard_paste();
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
             app.erase_selection();
         }
@@ -358,8 +368,41 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             app.redo();
         }
         ui.separator();
+        let has_sel = app.has_selection();
         if ui
-            .add(egui::Button::new("Erase").shortcut_text("Del"))
+            .add_enabled(
+                has_sel,
+                egui::Button::new("Cut").shortcut_text("Ctrl+X"),
+            )
+            .clicked()
+        {
+            app.clipboard_cut();
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                has_sel,
+                egui::Button::new("Copy").shortcut_text("Ctrl+C"),
+            )
+            .clicked()
+        {
+            app.clipboard_copy();
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                !app.clipboard.is_empty(),
+                egui::Button::new("Paste").shortcut_text("Ctrl+V"),
+            )
+            .on_hover_text("Paste at the cursor")
+            .clicked()
+        {
+            app.clipboard_paste();
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .add_enabled(has_sel, egui::Button::new("Erase").shortcut_text("Del"))
             .clicked()
         {
             app.erase_selection();
@@ -497,7 +540,64 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             },
         );
         ui.separator();
-        tool_menu_item(ui, app, "Dimension", Tool::Dimension { p1: None, p2: None });
+        ui.menu_button("Dimension ▸", |ui| {
+            tool_menu_item(
+                ui,
+                app,
+                "Linear / Aligned",
+                Tool::Dimension { p1: None, p2: None },
+            );
+            tool_menu_item(
+                ui,
+                app,
+                "Horizontal",
+                Tool::DimOrtho {
+                    vertical: false,
+                    p1: None,
+                    p2: None,
+                },
+            );
+            tool_menu_item(
+                ui,
+                app,
+                "Vertical",
+                Tool::DimOrtho {
+                    vertical: true,
+                    p1: None,
+                    p2: None,
+                },
+            );
+            tool_menu_item(ui, app, "Angular (3 points)", Tool::DimAngular { pts: vec![] });
+            tool_menu_item(
+                ui,
+                app,
+                "Angular (2 lines)",
+                Tool::DimAngularLines {
+                    a: None,
+                    geom: None,
+                },
+            );
+            tool_menu_item(
+                ui,
+                app,
+                "Radius",
+                Tool::DimRadial {
+                    diameter: false,
+                    center: None,
+                    radius: 0.0,
+                },
+            );
+            tool_menu_item(
+                ui,
+                app,
+                "Diameter",
+                Tool::DimRadial {
+                    diameter: true,
+                    center: None,
+                    radius: 0.0,
+                },
+            );
+        });
     });
     ui.menu_button("Modify", |ui| {
         tool_menu_item(
@@ -950,6 +1050,22 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                 ui.label("Font");
                 font_combo(ui, "settings_dim_font", &mut ds.font);
             });
+            ui.horizontal(|ui| {
+                ui.label("Precision");
+                let mut prec = ds.precision as u32;
+                if ui
+                    .add(egui::DragValue::new(&mut prec).speed(0.1).range(0..=8))
+                    .on_hover_text("Decimal places in dimension values")
+                    .changed()
+                {
+                    ds.precision = prec as usize;
+                }
+                ui.label(
+                    egui::RichText::new("decimals")
+                        .size(11.0)
+                        .color(crate::theme::TEXT_DIM),
+                );
+            });
 
             ui.add_space(14.0);
             ui.horizontal(|ui| {
@@ -1053,7 +1169,11 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::CircleTtr { .. }
         | Tool::CircleTtt { .. }
         | Tool::TangentLine { .. }
-        | Tool::Dimension { .. } => "",
+        | Tool::Dimension { .. }
+        | Tool::DimOrtho { .. }
+        | Tool::DimAngular { .. }
+        | Tool::DimAngularLines { .. }
+        | Tool::DimRadial { .. } => "",
     }
 }
 
@@ -1247,12 +1367,68 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     ]
 }
 
+/// Whether an action is meaningless without a current selection — used to grey
+/// out the transform/combine tools (Move, Copy, Rotate, …, Disjoint, Join) while
+/// nothing is selected. Pick-based tools (Offset, Trim, Extend, Fillet, Chamfer,
+/// Hatch) operate by clicking and stay enabled.
+fn act_needs_selection(act: &Act) -> bool {
+    match act {
+        Act::Tool(t) => matches!(
+            t,
+            Tool::Move { .. }
+                | Tool::Copy { .. }
+                | Tool::Rotate { .. }
+                | Tool::Scale { .. }
+                | Tool::Mirror { .. }
+                | Tool::Stretch { .. }
+        ),
+        Act::Cmd(c) => matches!(c, Command::Explode | Command::Join),
+    }
+}
+
+/// Render one vertical column of dock tools, greying out selection-only tools
+/// when nothing is selected. `divider_after_first` draws a rule after the top
+/// entry (used to set Select apart from the draw tools).
+fn dock_column(
+    ui: &mut egui::Ui,
+    app: &mut AppState,
+    entries: &[(crate::icons::Icon, &'static str, Act)],
+    icon_px: f32,
+    divider_after_first: bool,
+) {
+    let has_sel = app.has_selection();
+    ui.spacing_mut().item_spacing = egui::vec2(0.0, 3.0);
+    ui.vertical_centered(|ui| {
+        for (i, (icon, tip, act)) in entries.iter().enumerate() {
+            if divider_after_first && i == 1 {
+                dock_divider(ui);
+            }
+            let active = matches!(act, Act::Tool(t) if app.tool.name() == t.name());
+            let enabled = has_sel || !act_needs_selection(act);
+            let clicked = ui
+                .add_enabled_ui(enabled, |ui| {
+                    crate::icons::icon_button_sized(ui, *icon, tip, active, icon_px)
+                })
+                .inner
+                .clicked();
+            if clicked {
+                run_act(app, act);
+            }
+        }
+    });
+}
+
 pub(super) fn ribbon(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
-    let entries = draw_entries();
+    let draw = draw_entries();
+    let modify = modify_entries();
     let avail = canvas_rect;
-    // The dock floats, vertically centred, as a single column glass pill.
-    let row_h = 47.0;
-    let est_h = entries.len() as f32 * row_h + 24.0;
+    // Two adjacent columns — Draw (left) and Modify (right) — inside one glass
+    // pill. Height follows the taller column; the dock floats vertically centred
+    // and clamps to the top so it never rides off the canvas.
+    let icon_px = 36.0;
+    let row_h = icon_px + 3.0;
+    let rows = draw.len().max(modify.len());
+    let est_h = rows as f32 * row_h + 24.0;
     let y = (avail.center().y - est_h / 2.0).max(avail.top() + 76.0);
 
     egui::Area::new(egui::Id::new("tool_ribbon"))
@@ -1262,23 +1438,25 @@ pub(super) fn ribbon(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect)
             crate::theme::glass(crate::theme::tok::R_LG)
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 4.0);
-                    ui.vertical_centered(|ui| {
-                        for (i, (icon, tip, act)) in entries.iter().enumerate() {
-                            // Divider after Select.
-                            if i == 1 {
-                                dock_divider(ui);
-                            }
-                            let active = matches!(act, Act::Tool(t) if app.tool.name() == t.name());
-                            if crate::icons::icon_button_sized(ui, *icon, tip, active, 38.0)
-                                .clicked()
-                            {
-                                run_act(app, act);
-                            }
-                        }
+                    ui.horizontal_top(|ui| {
+                        dock_column(ui, app, &draw, icon_px, true);
+                        dock_vsep(ui, est_h.min(rows as f32 * row_h));
+                        dock_column(ui, app, &modify, icon_px, false);
                     });
                 });
         });
+}
+
+/// Thin vertical rule separating the two dock columns.
+fn dock_vsep(ui: &mut egui::Ui, height: f32) {
+    ui.add_space(3.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, height), egui::Sense::hover());
+    ui.painter().vline(
+        rect.center().x,
+        rect.y_range(),
+        egui::Stroke::new(1.0, crate::theme::OUTLINE),
+    );
+    ui.add_space(3.0);
 }
 
 fn dock_divider(ui: &mut egui::Ui) {
@@ -1310,21 +1488,6 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
-                        // ── Modify tools, same size as the left toolbar tools.
-                        ui.scope(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-                            for (icon, tip, act) in modify_entries() {
-                                let active =
-                                    matches!(&act, Act::Tool(t) if app.tool.name() == t.name());
-                                if crate::icons::icon_button_sized(ui, icon, tip, active, 38.0)
-                                    .clicked()
-                                {
-                                    run_act(app, &act);
-                                }
-                            }
-                        });
-                        pill_sep(ui);
-
                         // ── Live cursor coordinates: "X  14.20    Y  248.75   mm".
                         // Values sit in fixed-width left-aligned cells so the gaps
                         // stay constant regardless of the number's length.
@@ -2059,12 +2222,248 @@ fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
 }
 
 /// Floating contextual toolbar shown just above a single selected entity.
-pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
-    if !matches!(app.tool, Tool::Select) || app.selection.len() != 1 {
+/// Contextual key hints for the active tool, à la Plasticity's command panel: a
+/// translucent rounded card pinned to the bottom-right of the canvas listing the
+/// keys/gestures available right now. On an empty drawing with no tool active it
+/// turns into a short getting-started card instead.
+pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::Rect) {
+    let (title, rows) = tool_hints(app);
+    if rows.is_empty() {
         return;
     }
-    let id = app.selection[0];
-    let Some(bbox) = app.document.get(id).and_then(|e| e.bounding_box()) else {
+
+    // Sit above the bottom-right scale bar so the two never overlap.
+    egui::Area::new(egui::Id::new("tool_hint_panel"))
+        .anchor(
+            egui::Align2::RIGHT_BOTTOM,
+            egui::vec2(
+                -16.0,
+                -(canvas_rect.bottom() - ctx.content_rect().bottom()) - 54.0,
+            ),
+        )
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .show(ctx, |ui| {
+            // A lighter, more transparent card than the solid glass panels, so it
+            // reads as an unobtrusive heads-up overlay over the drawing.
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(15, 19, 29, 168))
+                .stroke(egui::Stroke::new(1.0, crate::theme::OUTLINE))
+                .corner_radius(crate::theme::tok::R_MD)
+                .inner_margin(egui::Margin::symmetric(12, 9))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 5.0);
+                    ui.label(
+                        egui::RichText::new(title)
+                            .size(11.5)
+                            .strong()
+                            .color(crate::theme::ACCENT_BRIGHT),
+                    );
+                    for (keys, desc) in rows {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            keycap(ui, keys);
+                            ui.label(
+                                egui::RichText::new(desc)
+                                    .size(11.5)
+                                    .color(crate::theme::TEXT_DIM),
+                            );
+                        });
+                    }
+                });
+        });
+}
+
+/// Draw a small rounded "keycap" chip holding a key label (e.g. `Esc`, `Ctrl+V`).
+fn keycap(ui: &mut egui::Ui, label: &str) {
+    let font = egui::FontId::monospace(11.0);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), font.clone(), crate::theme::TEXT);
+    let pad = egui::vec2(6.0, 2.5);
+    let size = galley.size() + pad * 2.0;
+    // Fixed-width key column so the descriptions line up across rows.
+    let cell_w = size.x.max(56.0);
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(cell_w, size.y.max(17.0)), egui::Sense::hover());
+    let chip = egui::Rect::from_min_size(rect.min, size);
+    ui.painter().rect(
+        chip,
+        5.0,
+        egui::Color32::from_rgba_unmultiplied(40, 48, 64, 235),
+        egui::Stroke::new(1.0, crate::theme::OUTLINE),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(chip.min + pad, galley, crate::theme::TEXT);
+}
+
+/// The hint title and key/gesture rows for the current tool.
+fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)>) {
+    use Tool::*;
+    match &app.tool {
+        Select => {
+            if app.document.is_empty() || !app.has_selection() && app.document.len() <= 1 {
+                // Empty (or near-empty) drawing → getting-started card.
+                (
+                    "Getting started",
+                    vec![
+                        ("L", "draw a line"),
+                        ("C", "draw a circle"),
+                        ("R", "draw a rectangle"),
+                        ("Ctrl+F", "all commands"),
+                    ],
+                )
+            } else if app.has_selection() {
+                (
+                    "Selection",
+                    vec![
+                        ("Drag", "grips to reshape"),
+                        ("Ctrl+C / V", "copy / paste"),
+                        ("Del", "delete"),
+                        ("Esc", "deselect"),
+                    ],
+                )
+            } else {
+                (
+                    "Select",
+                    vec![
+                        ("Click", "pick an entity"),
+                        ("Drag →", "window select"),
+                        ("Drag ←", "crossing select"),
+                        ("Shift", "add / remove"),
+                    ],
+                )
+            }
+        }
+        Line { .. } => (
+            "Line",
+            vec![
+                ("Click", "set points"),
+                ("type", "length / x,y"),
+                ("Esc", "finish"),
+            ],
+        ),
+        Polyline { .. } => (
+            "Polyline",
+            vec![
+                ("Click", "add a point"),
+                ("Enter", "finish"),
+                ("C", "close"),
+                ("Esc", "cancel"),
+            ],
+        ),
+        Spline { .. } => (
+            "Spline",
+            vec![
+                ("Click", "add control vertex"),
+                ("Enter", "finish"),
+                ("C", "close"),
+                ("Esc", "cancel"),
+            ],
+        ),
+        Rectangle { .. } => (
+            "Rectangle",
+            vec![
+                ("Click", "two corners"),
+                ("type", "width / height"),
+                ("aim", "sets direction"),
+            ],
+        ),
+        Polygon { .. } => (
+            "Polygon",
+            vec![
+                ("type", "side count"),
+                ("Click", "center, then radius"),
+                ("aim", "sets direction"),
+            ],
+        ),
+        Circle { .. } | CircleTwoPoint { .. } | CircleThreePoint { .. } => (
+            "Circle",
+            vec![("Click", "center, then radius"), ("type", "radius")],
+        ),
+        Arc3 { .. } | ArcStartCenterEnd { .. } | ArcCenterStartEnd { .. } => {
+            ("Arc", vec![("Click", "three points"), ("Esc", "cancel")])
+        }
+        Ellipse { .. } => (
+            "Ellipse",
+            vec![
+                ("Click", "center, axes"),
+                ("type", "major / minor"),
+                ("Tab", "switch field"),
+            ],
+        ),
+        Text { .. } => (
+            "Text",
+            vec![("Click", "anchor point"), ("Enter", "place"), ("Esc", "cancel")],
+        ),
+        Move { .. } | Copy { .. } => (
+            "Move / Copy",
+            vec![
+                ("Click", "base, destination"),
+                ("type", "distance / @x,y"),
+                ("Esc", "cancel"),
+            ],
+        ),
+        Rotate { .. } => (
+            "Rotate",
+            vec![("Click", "base, then angle"), ("type", "angle°"), ("Esc", "cancel")],
+        ),
+        Scale { .. } => (
+            "Scale",
+            vec![("Click", "base, then factor"), ("type", "factor"), ("Esc", "cancel")],
+        ),
+        Mirror { .. } => (
+            "Mirror",
+            vec![("Click", "two axis points"), ("Esc", "cancel")],
+        ),
+        Offset { .. } => (
+            "Offset",
+            vec![
+                ("type", "distance"),
+                ("Click", "curve, then side"),
+                ("Esc", "cancel"),
+            ],
+        ),
+        Trim => ("Trim", vec![("Click", "piece to cut"), ("Esc", "finish")]),
+        Extend => ("Extend", vec![("Click", "end to lengthen"), ("Esc", "finish")]),
+        Fillet { .. } => (
+            "Fillet",
+            vec![("type", "radius"), ("Click", "two lines"), ("Esc", "cancel")],
+        ),
+        Chamfer { .. } => (
+            "Chamfer",
+            vec![("type", "distance"), ("Click", "two lines"), ("Esc", "cancel")],
+        ),
+        Stretch { .. } => (
+            "Stretch",
+            vec![
+                ("Drag", "crossing window"),
+                ("Click", "base, destination"),
+                ("Esc", "cancel"),
+            ],
+        ),
+        Dimension { .. } => (
+            "Dimension",
+            vec![("Click", "two points, offset"), ("Esc", "cancel")],
+        ),
+        Hatch => ("Hatch", vec![("Click", "inside an area"), ("Esc", "finish")]),
+        _ => ("", vec![]),
+    }
+}
+
+pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
+    if !matches!(app.tool, Tool::Select) || !app.has_selection() {
+        return;
+    }
+    // Combined bounding box of the whole selection, so the bar follows multi-
+    // selections (every action below operates on all selected entities).
+    let Some(bbox) = app
+        .selection
+        .iter()
+        .filter(|&&id| id != app.origin_id)
+        .filter_map(|&id| app.document.get(id).and_then(|e| e.bounding_box()))
+        .reduce(|a, b| a.union(&b))
+    else {
         return;
     };
     // Anchor above the bbox top-centre, in screen space.
@@ -2235,6 +2634,11 @@ fn kind_label(kind: &EntityKind) -> &'static str {
         EntityKind::Insert { .. } => "Block insert",
         EntityKind::Hatch { .. } => "Hatch",
         EntityKind::Dimension { .. } => "Dimension",
+        EntityKind::OrthoDim { vertical: true, .. } => "Vertical dimension",
+        EntityKind::OrthoDim { .. } => "Horizontal dimension",
+        EntityKind::AngularDim { .. } => "Angular dimension",
+        EntityKind::RadialDim { diameter: true, .. } => "Diameter dimension",
+        EntityKind::RadialDim { .. } => "Radius dimension",
     }
 }
 
@@ -2300,8 +2704,89 @@ fn object_header(ui: &mut egui::Ui, name: &str, subtitle: &str, icon: crate::ico
     });
 }
 
+/// Text-override editor shown for a selected dimension: type custom text to show
+/// instead of the measured value, or clear it to fall back to the measurement.
+fn dim_override_editor(ui: &mut egui::Ui, app: &mut AppState, id: eiderflat_document::EntityId) {
+    let is_dim = matches!(
+        app.document.get(id).map(|e| &e.kind),
+        Some(
+            EntityKind::Dimension { .. }
+                | EntityKind::OrthoDim { .. }
+                | EntityKind::AngularDim { .. }
+                | EntityKind::RadialDim { .. }
+        )
+    );
+    if !is_dim {
+        return;
+    }
+    prop_section(ui, "TEXT OVERRIDE");
+    let mut buf = app.dim_override(id).unwrap_or_default();
+    let resp = ui.add(
+        egui::TextEdit::singleline(&mut buf)
+            .hint_text("measured value")
+            .desired_width(f32::INFINITY),
+    );
+    // Snapshot once when editing begins, so the whole edit is one undo step.
+    if resp.gained_focus() {
+        app.begin_edit();
+    }
+    if resp.changed() {
+        app.set_dim_override(id, Some(buf));
+    }
+}
+
 fn measurements(ui: &mut egui::Ui, kind: &EntityKind) {
     use eiderflat_geometry::CurveSegment;
+    // Dimensions report what they measure.
+    match kind {
+        EntityKind::Dimension { p1, p2, .. } => {
+            prop_section(ui, "MEASUREMENTS");
+            metric_field(ui, "Length", p1.dist_f64(p2));
+            return;
+        }
+        EntityKind::OrthoDim {
+            p1, p2, vertical, ..
+        } => {
+            prop_section(ui, "MEASUREMENTS");
+            let (a, b) = (p1.to_f64(), p2.to_f64());
+            let d = if *vertical {
+                (b.1 - a.1).abs()
+            } else {
+                (b.0 - a.0).abs()
+            };
+            metric_field(ui, if *vertical { "Height" } else { "Width" }, d);
+            return;
+        }
+        EntityKind::AngularDim {
+            center, p1, p2, ..
+        } => {
+            prop_section(ui, "MEASUREMENTS");
+            let (cx, cy) = center.to_f64();
+            let (a1x, a1y) = p1.to_f64();
+            let (a2x, a2y) = p2.to_f64();
+            let a = eiderflat_geometry::wrap_deg360(
+                ((a2y - cy).atan2(a2x - cx) - (a1y - cy).atan2(a1x - cx)).to_degrees(),
+            );
+            metric_field(ui, "Angle °", a);
+            return;
+        }
+        EntityKind::RadialDim {
+            center,
+            edge,
+            diameter,
+            ..
+        } => {
+            prop_section(ui, "MEASUREMENTS");
+            let r = center.dist_f64(edge);
+            ui.columns(2, |c| {
+                metric_field(&mut c[0], "Radius", r);
+                metric_field(&mut c[1], "Diameter", 2.0 * r);
+            });
+            let _ = diameter;
+            return;
+        }
+        _ => {}
+    }
     let EntityKind::Curve(c) = kind else {
         return;
     };
@@ -2596,6 +3081,7 @@ fn selection_properties(ui: &mut egui::Ui, app: &mut AppState) {
             if let Some(e) = app.document.get(id) {
                 measurements(ui, &e.kind);
             }
+            dim_override_editor(ui, app, id);
         }
     } else {
         ui.add(egui::Label::new(

@@ -1,4 +1,5 @@
 use crate::curve::{Curve, CurveSegment};
+use crate::point::Point2d;
 use crate::primitives::{CircularArc, LineSeg};
 
 #[derive(Clone, Debug)]
@@ -16,6 +17,23 @@ pub fn intersect_line_line(l1: &LineSeg, l2: &LineSeg) -> Option<CurveIntersecti
         l2.p1.to_f64(),
     )
     .map(|(point, t1, t2)| CurveIntersection { point, t1, t2 })
+}
+
+/// Intersection of the two *infinite* lines carrying `l1` and `l2` (unlike
+/// [`intersect_line_line`], the crossing need not lie within either segment).
+/// Returns `None` when the lines are parallel. Useful for angular dimensions,
+/// extended trims and construction geometry.
+pub fn intersect_lines_unbounded(l1: &LineSeg, l2: &LineSeg) -> Option<Point2d> {
+    let (x1, y1) = l1.p0.to_f64();
+    let (x2, y2) = l1.p1.to_f64();
+    let (x3, y3) = l2.p0.to_f64();
+    let (x4, y4) = l2.p1.to_f64();
+    let denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if denom.abs() < 1e-12 {
+        return None;
+    }
+    let t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+    Some(Point2d::from_f64(x1 + t * (x2 - x1), y1 + t * (y2 - y1)))
 }
 
 pub fn intersect_line_circle(line: &LineSeg, arc: &CircularArc) -> Vec<CurveIntersection> {

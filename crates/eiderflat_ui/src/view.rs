@@ -14,7 +14,7 @@ mod render;
 mod tessellate;
 use chrome::{
     about_window, contextual_toolbar, handle_shortcuts, inspector, line_props_dialog, ribbon,
-    settings_dialog, status_pill, top_bar,
+    settings_dialog, status_pill, tool_hint_panel, top_bar,
 };
 use palette::command_bar;
 use render::{
@@ -100,6 +100,7 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     inspector(&ctx, app, canvas_rect);
     status_pill(&ctx, app, canvas_rect);
     contextual_toolbar(&ctx, app, canvas_rect);
+    tool_hint_panel(&ctx, app, canvas_rect);
     about_window(&ctx, ui_state);
     line_props_dialog(&ctx, app, ui_state);
     settings_dialog(&ctx, app, ui_state);
@@ -290,6 +291,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         overlays::dyn_ellipse_hud(ctx, app, ui_state, origin);
         overlays::dyn_offset_hud(ctx, app, ui_state, origin);
         overlays::dyn_text_hud(ctx, app, ui_state, origin);
+        overlays::cursor_readout(ctx, app, origin);
         let has_own_grips = !app.selection_grips().is_empty();
         let mut bbox_drag_active = false;
         if !press_consumed
@@ -561,6 +563,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             }
             response.context_menu(|ui| {
                 if !app.selection.is_empty() {
+                    if ui.button("Cut").clicked() {
+                        app.clipboard_cut();
+                        ui.close();
+                    }
+                    if ui.button("Copy").clicked() {
+                        app.clipboard_copy();
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button("Delete").clicked() {
                         app.erase_selection();
                         ui.close();
@@ -594,51 +605,95 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         ui.close();
                     }
                     ui.separator();
-                    let acts = [
-                        (
-                            "Move",
-                            Command::Activate(Tool::Move {
-                                base: None,
-                                ids: vec![],
-                            }),
-                        ),
-                        (
-                            "Copy",
-                            Command::Activate(Tool::Copy {
-                                base: None,
-                                ids: vec![],
-                            }),
-                        ),
-                        (
-                            "Rotate",
-                            Command::Activate(Tool::Rotate {
-                                base: None,
-                                ids: vec![],
-                            }),
-                        ),
-                        (
-                            "Scale",
-                            Command::Activate(Tool::Scale {
-                                base: None,
-                                reference: None,
-                                ids: vec![],
-                            }),
-                        ),
-                        (
-                            "Mirror",
-                            Command::Activate(Tool::Mirror {
-                                first: None,
-                                ids: vec![],
-                            }),
-                        ),
-                    ];
-                    for (label, cmd) in acts {
-                        if ui.button(label).clicked() {
-                            app.execute(cmd);
-                            ui.close();
+                    ui.menu_button("Modify", |ui| {
+                        let acts: [(&str, Command); 11] = [
+                            (
+                                "Move",
+                                Command::Activate(Tool::Move {
+                                    base: None,
+                                    ids: vec![],
+                                }),
+                            ),
+                            (
+                                "Duplicate",
+                                Command::Activate(Tool::Copy {
+                                    base: None,
+                                    ids: vec![],
+                                }),
+                            ),
+                            (
+                                "Rotate",
+                                Command::Activate(Tool::Rotate {
+                                    base: None,
+                                    ids: vec![],
+                                }),
+                            ),
+                            (
+                                "Scale",
+                                Command::Activate(Tool::Scale {
+                                    base: None,
+                                    reference: None,
+                                    ids: vec![],
+                                }),
+                            ),
+                            (
+                                "Mirror",
+                                Command::Activate(Tool::Mirror {
+                                    first: None,
+                                    ids: vec![],
+                                }),
+                            ),
+                            (
+                                "Offset",
+                                Command::Activate(Tool::Offset {
+                                    dist: 1.0,
+                                    source: None,
+                                }),
+                            ),
+                            ("Trim", Command::Activate(Tool::Trim)),
+                            ("Extend", Command::Activate(Tool::Extend)),
+                            (
+                                "Fillet",
+                                Command::Activate(Tool::Fillet {
+                                    radius: 1.0,
+                                    first: None,
+                                }),
+                            ),
+                            (
+                                "Chamfer",
+                                Command::Activate(Tool::Chamfer {
+                                    dist: 1.0,
+                                    first: None,
+                                }),
+                            ),
+                            (
+                                "Stretch",
+                                Command::Activate(Tool::Stretch {
+                                    c1: None,
+                                    c2: None,
+                                    base: None,
+                                    ids: vec![],
+                                }),
+                            ),
+                        ];
+                        for (label, cmd) in acts {
+                            if ui.button(label).clicked() {
+                                app.execute(cmd);
+                                ui.close();
+                            }
                         }
-                    }
+                    });
                     ui.separator();
+                }
+                if ui
+                    .add_enabled(
+                        !app.clipboard.is_empty(),
+                        egui::Button::new("Paste"),
+                    )
+                    .clicked()
+                {
+                    app.clipboard_paste();
+                    ui.close();
                 }
                 if let Some(last) = app.last_command.clone()
                     && ui.button(format!("Repeat: {last}")).clicked()
@@ -813,8 +868,28 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         refresh_text_cache(app, &mut ui_state.text_cache);
         let selected_set: std::collections::HashSet<EntityId> =
             app.selection.iter().copied().collect();
+        // Viewport culling: only entities whose bounding box overlaps the visible
+        // world rectangle are tessellated and painted. The rect is padded by a few
+        // screen pixels' worth of world space so wide line weights, hover/selection
+        // emphasis and dimension decorations never pop in at the edges. Entities
+        // with no finite bounding box (infinite construction lines, block inserts)
+        // are always drawn.
+        let (vx0, vy0, vx1, vy1) = app.view.visible_bounds();
+        let cull_pad = 32.0 * app.view.pixel_world_size();
+        let view_bb = eiderflat_geometry::BoundingBox::from_corners(
+            vx0 - cull_pad,
+            vy0 - cull_pad,
+            vx1 + cull_pad,
+            vy1 + cull_pad,
+        );
         for e in app.document.iter() {
             if e.id != app.origin_id && !layer_visible(app, e) {
+                continue;
+            }
+            if e.id != app.origin_id
+                && let Some(bb) = e.bounding_box()
+                && !bb.intersects(&view_bb)
+            {
                 continue;
             }
             let (r, g, b) = resolve_color(app, e);
@@ -1163,15 +1238,10 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         for c in app.tool.preview(&cursor) {
             draw_curve(&painter, &c, &to_screen, preview_stroke);
         }
-        // Live dimension: once both points are placed, preview the full
-        // dimension (extension lines, arrows, text) tracking the cursor offset.
-        if let Tool::Dimension {
-            p1: Some(a),
-            p2: Some(b),
-        } = &app.tool
+        // Live dimension previews track the cursor in the dimension layer's
+        // colour (green), so they read as the dimension they will become rather
+        // than a generic amber preview.
         {
-            // Preview in the dimension layer's colour (green) so it reads as the
-            // dimension it will become, not a generic amber preview.
             let dim_col = app
                 .document
                 .layers
@@ -1179,7 +1249,57 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 .and_then(|i| app.document.layers.get(i))
                 .map(|l| Color32::from_rgb(l.color.0, l.color.1, l.color.2))
                 .unwrap_or(Color32::from_rgb(46, 204, 113));
-            draw_dimension(&painter, app, *a, *b, cursor, &to_screen, dim_col);
+            match &app.tool {
+                // Linear: once both points are placed, the cursor sets the offset.
+                Tool::Dimension {
+                    p1: Some(a),
+                    p2: Some(b),
+                } => draw_dimension(&painter, app, *a, *b, cursor, None, &to_screen, dim_col),
+                // Axis-locked linear: same, with the horizontal/vertical lock.
+                Tool::DimOrtho {
+                    vertical,
+                    p1: Some(a),
+                    p2: Some(b),
+                } => render::draw_ortho_dim(
+                    &painter, app, *a, *b, cursor, *vertical, None, &to_screen, dim_col,
+                ),
+                // Angular: with the vertex + both ray points placed, the cursor
+                // positions the dimension arc.
+                Tool::DimAngular { pts } if pts.len() == 3 => {
+                    render::draw_angular_dim(
+                        &painter, app, pts[0], pts[1], pts[2], cursor, None, &to_screen, dim_col,
+                    );
+                }
+                // Angular from two lines: once both lines are picked, the cursor
+                // positions the arc.
+                Tool::DimAngularLines {
+                    geom: Some((v, a, b)),
+                    ..
+                } => {
+                    render::draw_angular_dim(
+                        &painter, app, *v, *a, *b, cursor, None, &to_screen, dim_col,
+                    );
+                }
+                // Radial: with the circle picked, the cursor aims the leader.
+                Tool::DimRadial {
+                    diameter,
+                    center: Some(c),
+                    radius,
+                } if *radius > 1e-9 => {
+                    let (cx, cy) = c.to_f64();
+                    let (dx, dy) = (cursor.x - cx, cursor.y - cy);
+                    let len = (dx * dx + dy * dy).sqrt();
+                    let edge = if len > 1e-9 {
+                        Point2d::from_f64(cx + dx / len * *radius, cy + dy / len * *radius)
+                    } else {
+                        Point2d::from_f64(cx + *radius, cy)
+                    };
+                    render::draw_radial_dim(
+                        &painter, app, *c, edge, *diameter, None, &to_screen, dim_col,
+                    );
+                }
+                _ => {}
+            }
         }
         draw_transform_ghost(&painter, app, &to_screen);
         draw_trim_extend_preview(&painter, app, &to_screen);
@@ -1363,10 +1483,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         let (x1, y1) = cursor.to_f64();
                         let dx = x1 - x0;
                         let dy = y1 - y0;
-                        let mut angle_deg = dy.atan2(dx).to_degrees();
-                        if angle_deg < 0.0 {
-                            angle_deg += 360.0;
-                        }
+                        let angle_deg = eiderflat_geometry::wrap_deg360(dy.atan2(dx).to_degrees());
                         Some(format!("L: {:.4}\nA: {:.1}°", d, angle_deg))
                     }
                     Tool::Circle { center: Some(c) } => {
@@ -1423,10 +1540,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         let (x1, y1) = cursor.to_f64();
                         let dx = x1 - x0;
                         let dy = y1 - y0;
-                        let mut angle_deg = dy.atan2(dx).to_degrees();
-                        if angle_deg < 0.0 {
-                            angle_deg += 360.0;
-                        }
+                        let angle_deg = eiderflat_geometry::wrap_deg360(dy.atan2(dx).to_degrees());
                         let n = sides.map(|s| s.to_string()).unwrap_or_else(|| "?".into());
                         Some(format!("R: {:.4}\nA: {:.1}°\nSides: {}", d, angle_deg, n))
                     }

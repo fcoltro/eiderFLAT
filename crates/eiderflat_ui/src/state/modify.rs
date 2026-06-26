@@ -72,6 +72,55 @@ impl AppState {
                 }
                 true
             }
+            Tool::DimRadial {
+                diameter,
+                center: None,
+                ..
+            } => {
+                // Pick a circle or arc; its centre + radius drive the dimension.
+                // The follow-up "aim the leader" click is a free point, handled by
+                // the normal tool path once `center` is set.
+                if let Some(id) = pick(self)
+                    && let Some((c, r)) = self
+                        .document
+                        .get(id)
+                        .and_then(|e| e.as_curve())
+                        .and_then(circle_center_radius)
+                {
+                    self.tool = Tool::DimRadial {
+                        diameter,
+                        center: Some(c),
+                        radius: r,
+                    };
+                }
+                true
+            }
+            Tool::DimAngularLines { a, geom: None } => {
+                // Pick two lines; their intersection is the angle vertex and a far
+                // point on each line gives the ray directions.
+                if let Some(id) = pick(self)
+                    && line_endpoints_of(self, id).is_some()
+                {
+                    match a {
+                        None => {
+                            self.tool = Tool::DimAngularLines {
+                                a: Some(id),
+                                geom: None,
+                            };
+                        }
+                        Some(first) if first != id => {
+                            if let Some(g) = angular_from_lines(self, first, id) {
+                                self.tool = Tool::DimAngularLines {
+                                    a: Some(first),
+                                    geom: Some(g),
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                true
+            }
             Tool::Fillet { radius, first } => {
                 if let Some(id) = pick(self) {
                     match first {
@@ -378,4 +427,46 @@ impl AppState {
 pub enum TrimExtendPreview {
     Remove(eiderflat_geometry::Curve),
     Extension(eiderflat_geometry::Curve),
+}
+
+/// Extract a (centre, radius) pair from a circular curve — a full circle or a
+/// circular arc. Returns `None` for anything else, so radius/diameter dimensions
+/// only attach to round geometry.
+fn circle_center_radius(c: &eiderflat_geometry::Curve) -> Option<(Point2d, f64)> {
+    match c {
+        eiderflat_geometry::Curve::Arc(a) => Some((a.center, a.radius)),
+        _ => None,
+    }
+}
+
+/// Endpoints of a picked straight line entity, or `None` if it isn't a line.
+fn line_endpoints_of(app: &AppState, id: EntityId) -> Option<(Point2d, Point2d)> {
+    match app.document.get(id)?.as_curve()? {
+        eiderflat_geometry::Curve::Line(l) => Some((l.p0, l.p1)),
+        _ => None,
+    }
+}
+
+/// Build angular-dimension geometry (vertex + a ray point on each line) from two
+/// picked lines, using their infinite-line intersection as the vertex.
+fn angular_from_lines(
+    app: &AppState,
+    a: EntityId,
+    b: EntityId,
+) -> Option<(Point2d, Point2d, Point2d)> {
+    let (a0, a1) = line_endpoints_of(app, a)?;
+    let (b0, b1) = line_endpoints_of(app, b)?;
+    let vertex = eiderflat_geometry::intersect_lines_unbounded(
+        &eiderflat_geometry::LineSeg::from_endpoints(a0, a1),
+        &eiderflat_geometry::LineSeg::from_endpoints(b0, b1),
+    )?;
+    // Ray point on each line = the endpoint farthest from the vertex.
+    let far = |p: Point2d, q: Point2d| {
+        if vertex.dist_f64(&p) >= vertex.dist_f64(&q) {
+            p
+        } else {
+            q
+        }
+    };
+    Some((vertex, far(a0, a1), far(b0, b1)))
 }

@@ -97,6 +97,33 @@ pub fn parse_command(input: &str) -> Command {
         "DIMENSION" | "DIM" | "DIMLINEAR" | "DIMALIGNED" => {
             Command::Activate(Tool::Dimension { p1: None, p2: None })
         }
+        "DIMHORIZONTAL" | "DIMHOR" | "DIMHORIZ" => Command::Activate(Tool::DimOrtho {
+            vertical: false,
+            p1: None,
+            p2: None,
+        }),
+        "DIMVERTICAL" | "DIMVER" | "DIMVERT" => Command::Activate(Tool::DimOrtho {
+            vertical: true,
+            p1: None,
+            p2: None,
+        }),
+        "DIMANGULAR" | "DIMANG" | "DIMANGLE" => {
+            Command::Activate(Tool::DimAngular { pts: vec![] })
+        }
+        "DIMANGLINES" | "DIMANG2" | "DIMANGL" => Command::Activate(Tool::DimAngularLines {
+            a: None,
+            geom: None,
+        }),
+        "DIMRADIUS" | "DIMRAD" => Command::Activate(Tool::DimRadial {
+            diameter: false,
+            center: None,
+            radius: 0.0,
+        }),
+        "DIMDIAMETER" | "DIMDIA" => Command::Activate(Tool::DimRadial {
+            diameter: true,
+            center: None,
+            radius: 0.0,
+        }),
         "ELLIPSE" | "EL" => Command::Activate(Tool::Ellipse {
             center: None,
             axis_end: None,
