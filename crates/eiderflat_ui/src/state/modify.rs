@@ -262,6 +262,7 @@ impl AppState {
     }
 
     /// Circle of `radius` tangent to entities `a` and `b`, nearest the pick.
+    /// Records the two tangency constraints so the circle stays tangent on edit.
     fn add_tangent_circle_ttr(&mut self, a: EntityId, b: EntityId, radius: f64, near: Point2d) {
         let (Some(c1), Some(c2)) = (
             self.document.get(a).and_then(|e| e.as_curve()).cloned(),
@@ -269,12 +270,21 @@ impl AppState {
         ) else {
             return;
         };
-        if let Some((center, r)) = eiderflat_geometry::tangent_circle_ttr(&c1, &c2, radius, near) {
-            self.create_full_circle(center, r);
+        if let Some((center, r)) = eiderflat_geometry::tangent_circle_ttr(&c1, &c2, radius, near)
+            && let Some(id) = self.create_full_circle(center, r)
+        {
+            self.set_tangents(
+                id,
+                vec![
+                    eiderflat_document::TangentRef { target: a, near },
+                    eiderflat_document::TangentRef { target: b, near },
+                ],
+            );
         }
     }
 
-    /// Circle tangent to three entities, nearest the final pick.
+    /// Circle tangent to three entities, nearest the final pick. Records all three
+    /// tangency constraints.
     fn add_tangent_circle_ttt(&mut self, ids: [EntityId; 3], near: Point2d) {
         let curves: Vec<_> = ids
             .iter()
@@ -285,20 +295,36 @@ impl AppState {
         }
         if let Some((center, r)) =
             eiderflat_geometry::tangent_circle_ttt(&curves[0], &curves[1], &curves[2], near)
+            && let Some(id) = self.create_full_circle(center, r)
         {
-            self.create_full_circle(center, r);
+            self.set_tangents(
+                id,
+                ids.iter()
+                    .map(|&t| eiderflat_document::TangentRef { target: t, near })
+                    .collect(),
+            );
+        }
+    }
+
+    fn set_tangents(&mut self, id: EntityId, tangents: Vec<eiderflat_document::TangentRef>) {
+        if let Some(e) = self.document.get_mut(id) {
+            e.tangents = tangents;
         }
     }
 
     /// Add a full circle as an entity, applying the new-object line defaults.
-    fn create_full_circle(&mut self, center: Point2d, r: f64) {
+    /// Returns the new entity id (so callers can attach constraints).
+    fn create_full_circle(&mut self, center: Point2d, r: f64) -> Option<EntityId> {
         if r <= 1e-9 {
-            return;
+            return None;
         }
         let arc = eiderflat_geometry::CircularArc::new(center, r, 0.0, std::f64::consts::TAU);
-        self.apply_tool_event(crate::tools::ToolEvent::Create(vec![
-            eiderflat_document::EntityKind::Curve(eiderflat_geometry::Curve::Arc(arc)),
-        ]));
+        self.history.snapshot(&self.document);
+        let id = self.document.add(eiderflat_document::EntityKind::Curve(
+            eiderflat_geometry::Curve::Arc(arc),
+        ));
+        self.apply_new_entity_defaults(id);
+        Some(id)
     }
 
     /// Add a line segment as an entity, applying the new-object line defaults.

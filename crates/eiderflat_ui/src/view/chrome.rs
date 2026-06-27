@@ -538,28 +538,8 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             tool_menu_item(
                 ui,
                 app,
-                "Linear / Aligned",
+                "Linear (aligned / H / V — by cursor)",
                 Tool::Dimension { p1: None, p2: None },
-            );
-            tool_menu_item(
-                ui,
-                app,
-                "Horizontal",
-                Tool::DimOrtho {
-                    vertical: false,
-                    p1: None,
-                    p2: None,
-                },
-            );
-            tool_menu_item(
-                ui,
-                app,
-                "Vertical",
-                Tool::DimOrtho {
-                    vertical: true,
-                    p1: None,
-                    p2: None,
-                },
             );
             tool_menu_item(
                 ui,
@@ -941,153 +921,361 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
         });
     let mut close = backdrop.inner.clicked();
 
+    let screen_h = ctx.content_rect().height();
     egui::Window::new("settings_dialog")
         .title_bar(false)
         .collapsible(false)
-        .resizable(false)
+        // Vertical-only resize: drag the bottom edge to make it taller/shorter.
+        .resizable([false, true])
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .fixed_size(egui::vec2(340.0, 0.0))
+        .default_height((screen_h * 0.7).clamp(360.0, 680.0))
+        .min_height(300.0)
+        .max_height(screen_h - 24.0)
         .show(ctx, |ui| {
-            ui.add_space(10.0);
+            ui.set_width(416.0);
+            // ── Header ─────────────────────────────────────────────────────
+            ui.add_space(4.0);
             ui.label(
                 egui::RichText::new("Settings")
-                    .size(14.0)
+                    .size(16.0)
                     .strong()
                     .color(crate::theme::TEXT),
             );
+            ui.label(
+                egui::RichText::new("Preferences, drawing aids & document defaults — drag the bottom edge to resize")
+                    .size(11.5)
+                    .color(crate::theme::TEXT_DIM),
+            );
+            ui.add_space(8.0);
+            settings_rule(ui);
 
-            // ── Units ──────────────────────────────────────────────────────
-            prop_section(ui, "UNITS");
-            egui::ComboBox::from_id_salt("settings_units")
-                .selected_text(units_label(app.document.settings.units))
-                .width(180.0)
-                .show_ui(ui, |ui| {
-                    for units in [
-                        Units::Millimeters,
-                        Units::Centimeters,
-                        Units::Meters,
-                        Units::Kilometers,
-                        Units::Inches,
-                        Units::Feet,
-                        Units::Unitless,
-                    ] {
-                        if ui
-                            .selectable_label(
-                                app.document.settings.units == units,
-                                units_label(units),
+            // Reserve room for the footer, then let the scroll area fill the rest
+            // of the (resizable) window height.
+            let footer_h = 60.0;
+            let scroll_h = (ui.available_height() - footer_h).max(120.0);
+            egui::ScrollArea::vertical()
+                .max_height(scroll_h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+
+                    settings_card(ui, "UNITS", |ui| {
+                        setting_row(ui, "Drawing units", |ui| {
+                            egui::ComboBox::from_id_salt("settings_units")
+                                .selected_text(units_label(app.document.settings.units))
+                                .width(200.0)
+                                .show_ui(ui, |ui| {
+                                    for units in [
+                                        Units::Millimeters,
+                                        Units::Centimeters,
+                                        Units::Meters,
+                                        Units::Kilometers,
+                                        Units::Inches,
+                                        Units::Feet,
+                                        Units::Unitless,
+                                    ] {
+                                        if ui
+                                            .selectable_label(
+                                                app.document.settings.units == units,
+                                                units_label(units),
+                                            )
+                                            .clicked()
+                                            && app.document.settings.units != units
+                                        {
+                                            app.document.settings.units = units;
+                                            app.sync_zoom_limits();
+                                        }
+                                    }
+                                });
+                        });
+                    });
+
+                    settings_card(ui, "DRAWING AIDS", |ui| {
+                        ui.columns(2, |c| {
+                            c[0].checkbox(&mut app.snap_on, "Object snap");
+                            c[0].checkbox(&mut app.grid_on, "Grid");
+                            c[0].checkbox(&mut app.grid_snap_on, "Snap to grid");
+                            c[0].checkbox(&mut app.track_on, "Extension tracking");
+                            // Ortho and polar are mutually exclusive (as the F-keys).
+                            let mut polar = app.polar_on;
+                            if c[1].checkbox(&mut polar, "Polar tracking").changed() {
+                                app.polar_on = polar;
+                                if polar {
+                                    app.ortho_on = false;
+                                }
+                            }
+                            let mut ortho = app.ortho_on;
+                            if c[1].checkbox(&mut ortho, "Ortho").changed() {
+                                app.ortho_on = ortho;
+                                if ortho {
+                                    app.polar_on = false;
+                                }
+                            }
+                            c[1].checkbox(&mut app.dyn_on, "Dynamic input");
+                        });
+                    });
+
+                    settings_card(ui, "POINTER & GUIDES", |ui| {
+                        setting_row(ui, "Snap sensitivity", |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut app.snap_px, 4.0..=24.0)
+                                    .suffix(" px")
+                                    .fixed_decimals(0),
                             )
-                            .clicked()
-                            && app.document.settings.units != units
-                        {
-                            app.document.settings.units = units;
-                            app.sync_zoom_limits();
-                        }
-                    }
+                            .on_hover_text("How close (in screen pixels) the cursor must be to snap");
+                        });
+                        setting_row(ui, "Polar angle step", |ui| {
+                            egui::ComboBox::from_id_salt("settings_polar_step")
+                                .selected_text(format!("{}°", app.polar_step as i32))
+                                .width(120.0)
+                                .show_ui(ui, |ui| {
+                                    for step in [5.0, 10.0, 15.0, 22.5, 30.0, 45.0, 90.0] {
+                                        if ui
+                                            .selectable_label(
+                                                (app.polar_step - step).abs() < 1e-6,
+                                                format!("{step}°"),
+                                            )
+                                            .clicked()
+                                        {
+                                            app.polar_step = step;
+                                        }
+                                    }
+                                });
+                        });
+                        ui.checkbox(&mut app.crosshair, "Full-screen crosshair cursor");
+                        setting_row(ui, "Pick-box size", |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut app.pick_box, 6.0..=24.0)
+                                    .suffix(" px")
+                                    .fixed_decimals(0),
+                            );
+                        });
+                    });
+
+                    settings_card(ui, "ZOOM", |ui| {
+                        setting_row(ui, "Wheel speed", |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut app.zoom_speed, 0.25..=3.0)
+                                    .fixed_decimals(2),
+                            );
+                        });
+                        ui.checkbox(&mut app.zoom_to_cursor, "Zoom toward cursor");
+                        ui.checkbox(&mut app.invert_zoom, "Invert wheel direction");
+                    });
+
+                    settings_card(ui, "DISPLAY", |ui| {
+                        ui.checkbox(&mut app.show_lineweights, "Show line weights");
+                        ui.add_space(2.0);
+                        setting_row(ui, "Line weight scale", |ui| {
+                            ui.add_enabled(
+                                app.show_lineweights,
+                                egui::Slider::new(&mut app.lineweight_scale, 1.0..=12.0)
+                                    .suffix(" px/mm")
+                                    .fixed_decimals(1),
+                            );
+                        });
+                    });
+
+                    settings_card(ui, "GRID", |ui| {
+                        ui.checkbox(&mut app.grid_dots, "Dotted grid (vs. lines)");
+                        ui.add_space(2.0);
+                        setting_row(ui, "Major line every", |ui| {
+                            let mut n = app.grid_major_every;
+                            if ui
+                                .add(egui::DragValue::new(&mut n).speed(0.1).range(2..=20))
+                                .changed()
+                            {
+                                app.grid_major_every = n;
+                            }
+                            ui.label(
+                                egui::RichText::new("lines")
+                                    .size(11.0)
+                                    .color(crate::theme::TEXT_DIM),
+                            );
+                        });
+                        setting_row(ui, "Minor colour", |ui| {
+                            let mut c = [
+                                app.grid_minor_rgb.0,
+                                app.grid_minor_rgb.1,
+                                app.grid_minor_rgb.2,
+                            ];
+                            if ui.color_edit_button_srgb(&mut c).changed() {
+                                app.grid_minor_rgb = (c[0], c[1], c[2]);
+                            }
+                            let mut m = [
+                                app.grid_major_rgb.0,
+                                app.grid_major_rgb.1,
+                                app.grid_major_rgb.2,
+                            ];
+                            ui.label(
+                                egui::RichText::new("Major")
+                                    .size(11.0)
+                                    .color(crate::theme::TEXT_DIM),
+                            );
+                            if ui.color_edit_button_srgb(&mut m).changed() {
+                                app.grid_major_rgb = (m[0], m[1], m[2]);
+                            }
+                        });
+                    });
+
+                    settings_card(ui, "OBJECT SNAPS", |ui| {
+                        let kinds = [
+                            (eiderflat_cad::SnapKind::Endpoint, "Endpoint"),
+                            (eiderflat_cad::SnapKind::Midpoint, "Midpoint"),
+                            (eiderflat_cad::SnapKind::Center, "Center"),
+                            (eiderflat_cad::SnapKind::Quadrant, "Quadrant"),
+                            (eiderflat_cad::SnapKind::Intersection, "Intersection"),
+                            (eiderflat_cad::SnapKind::Perpendicular, "Perpendicular"),
+                            (eiderflat_cad::SnapKind::Tangent, "Tangent"),
+                            (eiderflat_cad::SnapKind::Nearest, "Nearest"),
+                            (eiderflat_cad::SnapKind::Node, "Node"),
+                            (eiderflat_cad::SnapKind::Insertion, "Insertion"),
+                        ];
+                        ui.columns(2, |cols| {
+                            for (i, (kind, label)) in kinds.into_iter().enumerate() {
+                                let ui = &mut cols[i % 2];
+                                let mut on = app.snap.enabled.contains(&kind);
+                                if ui.checkbox(&mut on, label).changed() {
+                                    if on {
+                                        app.snap.enabled.push(kind);
+                                    } else {
+                                        app.snap.enabled.retain(|&k| k != kind);
+                                    }
+                                }
+                            }
+                        });
+                    });
+
+                    settings_card(ui, "DIMENSIONS", |ui| {
+                        let ds = &mut app.document.settings.dim_style;
+                        setting_row(ui, "Text height", |ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut ds.text_height)
+                                    .speed(0.1)
+                                    .range(0.1..=1000.0)
+                                    .max_decimals(3),
+                            );
+                        });
+                        setting_row(ui, "Arrow size", |ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut ds.arrow_size)
+                                    .speed(0.1)
+                                    .range(0.1..=1000.0)
+                                    .max_decimals(3),
+                            );
+                        });
+                        setting_row(ui, "Precision", |ui| {
+                            let mut prec = ds.precision as u32;
+                            if ui
+                                .add(egui::DragValue::new(&mut prec).speed(0.1).range(0..=8))
+                                .changed()
+                            {
+                                ds.precision = prec as usize;
+                            }
+                            ui.label(
+                                egui::RichText::new("decimals")
+                                    .size(11.0)
+                                    .color(crate::theme::TEXT_DIM),
+                            );
+                        });
+                        setting_row(ui, "Font", |ui| {
+                            font_combo(ui, "settings_dim_font", &mut ds.font);
+                        });
+                    });
+
+                    settings_card(ui, "TEXT", |ui| {
+                        setting_row(ui, "Default font", |ui| {
+                            font_combo(ui, "settings_font", &mut app.text_font);
+                        });
+                    });
+
+                    settings_card(ui, "CURVATURE COMB", |ui| {
+                        ui.checkbox(&mut app.comb_on, "Show on selected curves");
+                        ui.add_space(4.0);
+                        ui.add_enabled(
+                            app.comb_on,
+                            egui::Slider::new(&mut app.comb_scale, 1.0..=20.0).text("Tooth scale"),
+                        );
+                    });
+                    ui.add_space(8.0);
                 });
 
-            // ── Drawing aids (persist via UiPrefs) ─────────────────────────
-            prop_section(ui, "DRAWING AIDS");
-            ui.checkbox(&mut app.snap_on, "Object snap");
-            ui.checkbox(&mut app.grid_on, "Grid");
-            ui.checkbox(&mut app.grid_snap_on, "Snap to grid");
-            // Ortho and polar are mutually exclusive (same rule as the F-keys).
-            let mut polar = app.polar_on;
-            if ui.checkbox(&mut polar, "Polar tracking").changed() {
-                app.polar_on = polar;
-                if polar {
-                    app.ortho_on = false;
-                }
-            }
-            let mut ortho = app.ortho_on;
-            if ui.checkbox(&mut ortho, "Ortho").changed() {
-                app.ortho_on = ortho;
-                if ortho {
-                    app.polar_on = false;
-                }
-            }
-            ui.checkbox(&mut app.track_on, "Extension tracking");
-            ui.checkbox(&mut app.dyn_on, "Dynamic input");
-
-            // ── Curvature comb ─────────────────────────────────────────────
-            prop_section(ui, "CURVATURE COMB");
-            ui.checkbox(&mut app.comb_on, "Show on selected curves");
-            ui.add_enabled(
-                app.comb_on,
-                egui::Slider::new(&mut app.comb_scale, 1.0..=20.0).text("Scale"),
-            );
-
-            // ── Text ───────────────────────────────────────────────────────
-            prop_section(ui, "TEXT");
+            // ── Footer ─────────────────────────────────────────────────────
+            settings_rule(ui);
+            ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label("Default font");
-                font_combo(ui, "settings_font", &mut app.text_font);
-            });
-
-            // ── Dimensions ─────────────────────────────────────────────────
-            prop_section(ui, "DIMENSIONS");
-            let ds = &mut app.document.settings.dim_style;
-            ui.horizontal(|ui| {
-                ui.label("Text height");
-                ui.add(
-                    egui::DragValue::new(&mut ds.text_height)
-                        .speed(0.1)
-                        .range(0.1..=1000.0)
-                        .max_decimals(3),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.label("Arrow size");
-                ui.add(
-                    egui::DragValue::new(&mut ds.arrow_size)
-                        .speed(0.1)
-                        .range(0.1..=1000.0)
-                        .max_decimals(3),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.label("Font");
-                font_combo(ui, "settings_dim_font", &mut ds.font);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Precision");
-                let mut prec = ds.precision as u32;
-                if ui
-                    .add(egui::DragValue::new(&mut prec).speed(0.1).range(0..=8))
-                    .on_hover_text("Decimal places in dimension values")
-                    .changed()
-                {
-                    ds.precision = prec as usize;
-                }
-                ui.label(
-                    egui::RichText::new("decimals")
-                        .size(11.0)
-                        .color(crate::theme::TEXT_DIM),
-                );
-            });
-
-            ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                if ui.button("Reset Aids to Defaults").clicked() {
+                if ui.button("Reset aids").clicked() {
                     app.apply_prefs(&crate::state::UiPrefs::default());
                 }
-                if ui.button("Line Weight & Type…").clicked() {
+                if ui.button("Line weight & type…").clicked() {
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(egui::Id::new("open_line_props"), true));
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let close_btn = egui::Button::new(
+                        egui::RichText::new("Close").color(egui::Color32::WHITE),
+                    )
+                    .fill(crate::theme::ACCENT);
+                    if ui.add(close_btn).clicked() {
+                        close = true;
+                    }
+                });
             });
-            ui.add_space(8.0);
-            ui.vertical_centered(|ui| {
-                if ui.button("Close").clicked() {
-                    close = true;
-                }
-            });
-            ui.add_space(6.0);
+            ui.add_space(4.0);
         });
 
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui_state.settings_open = false;
     }
+}
+
+/// A full-width hairline rule used to divide the settings header/footer.
+fn settings_rule(ui: &mut egui::Ui) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        egui::Stroke::new(1.0, crate::theme::OUTLINE),
+    );
+}
+
+/// A bordered, padded settings group with a small caps title — the visual
+/// "division" between option groups in the settings dialog.
+fn settings_card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
+    ui.add_space(9.0);
+    egui::Frame::new()
+        .fill(crate::theme::PANEL_BG)
+        .stroke(egui::Stroke::new(1.0, crate::theme::OUTLINE))
+        .corner_radius(egui::CornerRadius::same(crate::theme::tok::R_MD))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(title)
+                    .size(10.5)
+                    .strong()
+                    .color(crate::theme::TEXT_DIM),
+            );
+            ui.add_space(9.0);
+            body(ui);
+        });
+}
+
+/// A settings row: a fixed-width label on the left, the control(s) on the right.
+fn setting_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(132.0, 24.0), egui::Sense::hover());
+        ui.painter().text(
+            egui::pos2(rect.left(), rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(12.5),
+            crate::theme::TEXT,
+        );
+        add(ui);
+    });
 }
 
 /// Human-readable label for a drawing-units choice.
@@ -1169,7 +1357,6 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::CircleTtt { .. }
         | Tool::TangentLine { .. }
         | Tool::Dimension { .. }
-        | Tool::DimOrtho { .. }
         | Tool::DimAngular { .. }
         | Tool::DimAngularLines { .. }
         | Tool::DimRadial { .. } => "",
@@ -1187,6 +1374,7 @@ fn tool_menu_item(ui: &mut egui::Ui, app: &mut AppState, label: &str, tool: Tool
     }
 }
 
+#[derive(Clone)]
 enum Act {
     Tool(Tool),
     Cmd(Command),
@@ -1256,6 +1444,11 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
                 anchor: None,
                 height: 2.5,
             }),
+        ),
+        (
+            Icon::Dimension,
+            "Dimension — hold for angular / radius / diameter",
+            Act::Tool(Tool::Dimension { p1: None, p2: None }),
         ),
     ]
 }
@@ -1385,32 +1578,175 @@ fn act_needs_selection(act: &Act) -> bool {
     }
 }
 
+/// The id of the flyout tool-group a dock entry belongs to (so hovering it opens
+/// a sub-tool flyout), or `None` for a plain single-tool button.
+fn group_id(act: &Act) -> Option<u8> {
+    match act {
+        Act::Tool(Tool::Line { .. }) => Some(0),
+        Act::Tool(Tool::Circle { .. }) => Some(1),
+        Act::Tool(Tool::Arc3 { .. }) => Some(2),
+        Act::Tool(Tool::Dimension { .. }) => Some(3),
+        _ => None,
+    }
+}
+
+/// The sub-tools shown in a group's flyout (icon, label, action).
+fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
+    use crate::icons::Icon;
+    match id {
+        0 => vec![
+            (Icon::Line, "Line", Act::Tool(Tool::Line { last: None })),
+            (
+                Icon::Line,
+                "Tangent line",
+                Act::Tool(Tool::TangentLine { first: None }),
+            ),
+        ],
+        1 => vec![
+            (
+                Icon::Circle,
+                "Center, radius",
+                Act::Tool(Tool::Circle { center: None }),
+            ),
+            (
+                Icon::Circle,
+                "2 points (diameter)",
+                Act::Tool(Tool::CircleTwoPoint { first: None }),
+            ),
+            (
+                Icon::Circle,
+                "3 points",
+                Act::Tool(Tool::CircleThreePoint { pts: vec![] }),
+            ),
+            (
+                Icon::Circle,
+                "Tangent, tangent, radius",
+                Act::Tool(Tool::CircleTtr {
+                    radius: 1.0,
+                    first: None,
+                }),
+            ),
+            (
+                Icon::Circle,
+                "Tangent, tangent, tangent",
+                Act::Tool(Tool::CircleTtt { picks: vec![] }),
+            ),
+        ],
+        2 => vec![
+            (Icon::Arc, "3 points", Act::Tool(Tool::Arc3 { pts: vec![] })),
+            (
+                Icon::Arc,
+                "Start, center, end",
+                Act::Tool(Tool::ArcStartCenterEnd {
+                    start: None,
+                    center: None,
+                }),
+            ),
+            (
+                Icon::Arc,
+                "Center, start, end",
+                Act::Tool(Tool::ArcCenterStartEnd {
+                    center: None,
+                    start: None,
+                }),
+            ),
+        ],
+        _ => vec![
+            (
+                Icon::Dimension,
+                "Linear — aligned / H / V by cursor",
+                Act::Tool(Tool::Dimension { p1: None, p2: None }),
+            ),
+            (
+                Icon::Dimension,
+                "Angular (3 points)",
+                Act::Tool(Tool::DimAngular { pts: vec![] }),
+            ),
+            (
+                Icon::Dimension,
+                "Angular (2 lines)",
+                Act::Tool(Tool::DimAngularLines {
+                    a: None,
+                    geom: None,
+                }),
+            ),
+            (
+                Icon::Dimension,
+                "Radius",
+                Act::Tool(Tool::DimRadial {
+                    diameter: false,
+                    center: None,
+                    radius: 0.0,
+                }),
+            ),
+            (
+                Icon::Dimension,
+                "Diameter",
+                Act::Tool(Tool::DimRadial {
+                    diameter: true,
+                    center: None,
+                    radius: 0.0,
+                }),
+            ),
+        ],
+    }
+}
+
+/// A little corner triangle marking a dock button that opens a tool flyout.
+fn flyout_marker(ui: &egui::Ui, rect: egui::Rect) {
+    let c = rect.right_bottom() + egui::vec2(-3.0, -3.0);
+    let p = ui.painter();
+    p.add(egui::Shape::convex_polygon(
+        vec![c, c + egui::vec2(-5.0, 0.0), c + egui::vec2(0.0, -5.0)],
+        crate::theme::TEXT_DIM,
+        egui::Stroke::NONE,
+    ));
+}
+
 /// Render one vertical column of dock tools, greying out selection-only tools
 /// when nothing is selected. `divider_after_first` draws a rule after the top
-/// entry (used to set Select apart from the draw tools).
+/// entry (used to set Select apart from the draw tools). Records into `hover` the
+/// group + screen-rect of any hovered grouped button, so the caller can open its
+/// flyout.
 fn dock_column(
     ui: &mut egui::Ui,
     app: &mut AppState,
     entries: &[(crate::icons::Icon, &'static str, Act)],
     icon_px: f32,
     divider_after_first: bool,
+    hover: &mut Option<(u8, egui::Rect)>,
 ) {
     let has_sel = app.has_selection();
-    ui.spacing_mut().item_spacing = egui::vec2(0.0, 3.0);
-    ui.vertical_centered(|ui| {
+    // Fixed-width column. `vertical_centered` here would read the available width
+    // to centre within — inside an auto-sized Area that feeds back and grows the
+    // dock wider every frame. Pinning the width to the icon size keeps it stable.
+    ui.vertical(|ui| {
+        ui.set_width(icon_px);
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 3.0);
         for (i, (icon, tip, act)) in entries.iter().enumerate() {
             if divider_after_first && i == 1 {
                 dock_divider(ui);
             }
             let active = matches!(act, Act::Tool(t) if app.tool.name() == t.name());
             let enabled = has_sel || !act_needs_selection(act);
-            let clicked = ui
+            let resp = ui
                 .add_enabled_ui(enabled, |ui| {
                     crate::icons::icon_button_sized(ui, *icon, tip, active, icon_px)
                 })
-                .inner
-                .clicked();
-            if clicked {
+                .inner;
+            if resp.hovered() {
+                // Preview this tool's tips in the bottom hint panel.
+                if let Act::Tool(t) = act {
+                    app.hint_tool = Some(t.clone());
+                }
+                if let Some(gid) = group_id(act) {
+                    *hover = Some((gid, resp.rect));
+                }
+            }
+            if group_id(act).is_some() {
+                flyout_marker(ui, resp.rect);
+            }
+            if resp.clicked() {
                 run_act(app, act);
             }
         }
@@ -1418,6 +1754,9 @@ fn dock_column(
 }
 
 pub(super) fn ribbon(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
+    // Cleared every frame; the dock sets it while a tool button is hovered so the
+    // bottom hint panel can preview that tool's tips.
+    app.hint_tool = None;
     let draw = draw_entries();
     let modify = modify_entries();
     let avail = canvas_rect;
@@ -1430,20 +1769,94 @@ pub(super) fn ribbon(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect)
     let est_h = rows as f32 * row_h + 24.0;
     let y = (avail.center().y - est_h / 2.0).max(avail.top() + 76.0);
 
-    egui::Area::new(egui::Id::new("tool_ribbon"))
+    let flyout_id = egui::Id::new("dock_flyout_open");
+    let prev: Option<(u8, egui::Rect)> = ctx.data(|d| d.get_temp(flyout_id));
+
+    let hover = egui::Area::new(egui::Id::new("tool_ribbon"))
         .fixed_pos(egui::pos2(avail.left() + 12.0, y))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             crate::theme::glass(crate::theme::tok::R_LG)
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
+                    let mut hover = None;
                     ui.horizontal_top(|ui| {
-                        dock_column(ui, app, &draw, icon_px, true);
+                        dock_column(ui, app, &draw, icon_px, true, &mut hover);
                         dock_vsep(ui, est_h.min(rows as f32 * row_h));
-                        dock_column(ui, app, &modify, icon_px, false);
+                        dock_column(ui, app, &modify, icon_px, false, &mut hover);
+                    });
+                    hover
+                })
+                .inner
+        })
+        .inner;
+
+    // Illustrator-style flyout: hovering a grouped button (or the flyout itself)
+    // opens a horizontal popup of its sub-tools, just to the right of the button.
+    let next = dock_flyout(ctx, app, hover.or(prev), hover);
+    if let Some(v) = next {
+        ctx.data_mut(|d| d.insert_temp(flyout_id, v));
+    } else {
+        ctx.data_mut(|d| {
+            d.remove::<(u8, egui::Rect)>(flyout_id);
+        });
+    }
+}
+
+/// Draw the open tool-group flyout (if any) and return the group that should stay
+/// open next frame. Stays open while the button or the flyout is hovered.
+fn dock_flyout(
+    ctx: &Context,
+    app: &mut AppState,
+    show: Option<(u8, egui::Rect)>,
+    hover: Option<(u8, egui::Rect)>,
+) -> Option<(u8, egui::Rect)> {
+    let (gid, anchor) = show?;
+    let entries = group_entries(gid);
+    let mut clicked: Option<Act> = None;
+    let mut hovered_sub: Option<Tool> = None;
+    let active_name = app.tool.name();
+    let area = egui::Area::new(egui::Id::new("dock_flyout"))
+        .fixed_pos(anchor.right_top() + egui::vec2(8.0, -6.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            crate::theme::glass(crate::theme::tok::R_MD)
+                .inner_margin(egui::Margin::same(6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        for (icon, label, act) in &entries {
+                            let active = matches!(act, Act::Tool(t) if active_name == t.name());
+                            let r = crate::icons::icon_button_sized(ui, *icon, label, active, 34.0);
+                            if r.hovered()
+                                && let Act::Tool(t) = act
+                            {
+                                hovered_sub = Some(t.clone());
+                            }
+                            if r.clicked() {
+                                clicked = Some(act.clone());
+                            }
+                        }
                     });
                 });
         });
+    if let Some(t) = hovered_sub {
+        app.hint_tool = Some(t);
+    }
+    if let Some(a) = clicked {
+        run_act(app, &a);
+        return None;
+    }
+    let flyout_hovered = ctx
+        .pointer_latest_pos()
+        .is_some_and(|p| area.response.rect.expand(6.0).contains(p));
+    if hover.is_some() {
+        hover
+    } else if flyout_hovered {
+        Some((gid, anchor))
+    } else {
+        None
+    }
 }
 
 /// Thin vertical rule separating the two dock columns.
@@ -1460,7 +1873,8 @@ fn dock_vsep(ui: &mut egui::Ui, height: f32) {
 
 fn dock_divider(ui: &mut egui::Ui) {
     ui.add_space(2.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 1.0), egui::Sense::hover());
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
     ui.painter().hline(
         rect.x_range(),
         rect.center().y,
@@ -2226,115 +2640,111 @@ fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
 /// keys/gestures available right now. On an empty drawing with no tool active it
 /// turns into a short getting-started card instead.
 pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::Rect) {
-    let (title, rows) = tool_hints(app);
+    // While the cursor is over a dock tool, show that tool's hints; otherwise the
+    // active tool's (with the empty-canvas / selection cards).
+    let (title, rows) = match &app.hint_tool {
+        Some(t) => hints_for_tool(t),
+        None => tool_hints(app),
+    };
     if rows.is_empty() {
         return;
     }
 
-    // Sit above the bottom-right scale bar so the two never overlap.
+    // Sit just left of the inspector column, near the bottom. No card background —
+    // a backgroundless, half-transparent heads-up hint that stays out of the way.
+    // The x offset mirrors the inspector geometry (right margin 12 + width 292).
+    let _ = canvas_rect;
     egui::Area::new(egui::Id::new("tool_hint_panel"))
         .anchor(
             egui::Align2::RIGHT_BOTTOM,
-            egui::vec2(
-                -16.0,
-                -(canvas_rect.bottom() - ctx.content_rect().bottom()) - 54.0,
-            ),
+            egui::vec2(-(12.0 + 292.0 + 12.0), -16.0),
         )
         .order(egui::Order::Foreground)
         .interactable(false)
         .show(ctx, |ui| {
-            // A lighter, more transparent card than the solid glass panels, so it
-            // reads as an unobtrusive heads-up overlay over the drawing.
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgba_unmultiplied(15, 19, 29, 168))
-                .stroke(egui::Stroke::new(1.0, crate::theme::OUTLINE))
-                .corner_radius(crate::theme::tok::R_MD)
-                .inner_margin(egui::Margin::symmetric(12, 9))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 5.0);
+            // Non-selectable text so hovering the panel never shows a text caret.
+            ui.style_mut().interaction.selectable_labels = false;
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 5.0);
+            ui.label(
+                egui::RichText::new(title)
+                    .size(11.5)
+                    .strong()
+                    .color(crate::theme::ACCENT_BRIGHT.gamma_multiply(0.5)),
+            );
+            for (keys, desc) in rows {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    keycap(ui, keys);
                     ui.label(
-                        egui::RichText::new(title)
+                        egui::RichText::new(desc)
                             .size(11.5)
-                            .strong()
-                            .color(crate::theme::ACCENT_BRIGHT),
+                            .color(crate::theme::TEXT_DIM.gamma_multiply(0.5)),
                     );
-                    for (keys, desc) in rows {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            keycap(ui, keys);
-                            ui.label(
-                                egui::RichText::new(desc)
-                                    .size(11.5)
-                                    .color(crate::theme::TEXT_DIM),
-                            );
-                        });
-                    }
                 });
+            }
         });
 }
 
-/// Draw a small rounded "keycap" chip holding a key label (e.g. `Esc`, `Ctrl+V`).
+/// Draw a key label (e.g. `Esc`, `Ctrl+V`) for the hint panel: backgroundless,
+/// half-transparent monospace, slightly brighter than the description so it still
+/// reads as the key. A fixed-width cell keeps the descriptions aligned.
 fn keycap(ui: &mut egui::Ui, label: &str) {
-    let font = egui::FontId::monospace(11.0);
+    let col = crate::theme::TEXT.gamma_multiply(0.5);
     let galley = ui
         .painter()
-        .layout_no_wrap(label.to_string(), font.clone(), crate::theme::TEXT);
-    let pad = egui::vec2(6.0, 2.5);
-    let size = galley.size() + pad * 2.0;
-    // Fixed-width key column so the descriptions line up across rows.
-    let cell_w = size.x.max(56.0);
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(cell_w, size.y.max(17.0)), egui::Sense::hover());
-    let chip = egui::Rect::from_min_size(rect.min, size);
-    ui.painter().rect(
-        chip,
-        5.0,
-        egui::Color32::from_rgba_unmultiplied(40, 48, 64, 235),
-        egui::Stroke::new(1.0, crate::theme::OUTLINE),
-        egui::StrokeKind::Inside,
+        .layout_no_wrap(label.to_string(), egui::FontId::monospace(11.0), col);
+    let cell_w = galley.size().x.max(46.0);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(cell_w, galley.size().y.max(16.0)),
+        egui::Sense::hover(),
     );
-    ui.painter()
-        .galley(chip.min + pad, galley, crate::theme::TEXT);
+    ui.painter().galley(rect.min, galley, col);
 }
 
-/// The hint title and key/gesture rows for the current tool.
+/// The hint title and key/gesture rows for the *active* tool, with the empty-
+/// drawing getting-started card and the selection card layered on top of Select.
 fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)>) {
-    use Tool::*;
-    match &app.tool {
-        Select => {
-            if app.document.is_empty() || !app.has_selection() && app.document.len() <= 1 {
-                // Empty (or near-empty) drawing → getting-started card.
-                (
-                    "Getting started",
-                    vec![
-                        ("L", "draw a line"),
-                        ("C", "draw a circle"),
-                        ("R", "draw a rectangle"),
-                        ("Ctrl+F", "all commands"),
-                    ],
-                )
-            } else if app.has_selection() {
-                (
-                    "Selection",
-                    vec![
-                        ("Drag", "grips to reshape"),
-                        ("Ctrl+C / V", "copy / paste"),
-                        ("Del", "delete"),
-                        ("Esc", "deselect"),
-                    ],
-                )
-            } else {
-                (
-                    "Select",
-                    vec![
-                        ("Click", "pick an entity"),
-                        ("Drag →", "window select"),
-                        ("Drag ←", "crossing select"),
-                        ("Shift", "add / remove"),
-                    ],
-                )
-            }
+    if matches!(app.tool, Tool::Select) {
+        if app.document.is_empty() || (!app.has_selection() && app.document.len() <= 1) {
+            return (
+                "Getting started",
+                vec![
+                    ("L", "draw a line"),
+                    ("C", "draw a circle"),
+                    ("R", "draw a rectangle"),
+                    ("Ctrl+F", "all commands"),
+                ],
+            );
         }
+        if app.has_selection() {
+            return (
+                "Selection",
+                vec![
+                    ("Drag", "grips to reshape"),
+                    ("Ctrl+C / V", "copy / paste"),
+                    ("Del", "delete"),
+                    ("Esc", "deselect"),
+                ],
+            );
+        }
+    }
+    hints_for_tool(&app.tool)
+}
+
+/// Per-tool hint title + rows, independent of document/selection state — used
+/// both for the active tool and for whichever dock tool the cursor is hovering.
+fn hints_for_tool(tool: &Tool) -> (&'static str, Vec<(&'static str, &'static str)>) {
+    use Tool::*;
+    match tool {
+        Select => (
+            "Select",
+            vec![
+                ("Click", "pick an entity"),
+                ("Drag →", "window select"),
+                ("Drag ←", "crossing select"),
+                ("Shift", "add / remove"),
+            ],
+        ),
         Line { .. } => (
             "Line",
             vec![

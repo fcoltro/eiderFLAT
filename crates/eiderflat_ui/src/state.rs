@@ -49,9 +49,37 @@ pub struct AppState {
     /// Show a curvature comb on selected curves, and its tooth scale.
     pub comb_on: bool,
     pub comb_scale: f64,
+    /// Object-snap pick radius, in screen pixels.
+    pub snap_px: f64,
+    /// Polar/angle-guide increment, in degrees.
+    pub polar_step: f64,
+    /// Mouse-wheel zoom speed multiplier.
+    pub zoom_speed: f64,
+    /// Zoom toward the cursor (true) or the view centre (false).
+    pub zoom_to_cursor: bool,
+    /// Invert the mouse-wheel zoom direction.
+    pub invert_zoom: bool,
+    /// Draw a full-canvas crosshair at the cursor (vs. a small cursor).
+    pub crosshair: bool,
+    /// Cursor aperture / pick-box size, in screen pixels.
+    pub pick_box: f64,
+    /// Render line weights (false → everything at hairline width).
+    pub show_lineweights: bool,
+    /// On-screen pixels per millimetre of line weight.
+    pub lineweight_scale: f64,
+    /// Dotted grid (true) vs. lined grid (false).
+    pub grid_dots: bool,
+    /// Emphasise every Nth grid line (major lines).
+    pub grid_major_every: u32,
+    /// Minor and major grid line colours.
+    pub grid_minor_rgb: (u8, u8, u8),
+    pub grid_major_rgb: (u8, u8, u8),
     /// In-app clipboard: entities captured by Copy/Cut, pasted at the cursor.
     /// Independent of the OS clipboard; lives only for the running session.
     pub clipboard: Vec<Entity>,
+    /// Transient (per-frame): the dock tool the cursor is hovering, so the
+    /// tool-hint panel can preview that tool's tips. Reset each frame by the dock.
+    pub hint_tool: Option<Tool>,
 }
 
 /// User interface preferences that persist across sessions (the snap/tracking
@@ -70,6 +98,19 @@ pub struct UiPrefs {
     pub dyn_on: bool,
     pub comb_on: bool,
     pub comb_scale: f64,
+    pub snap_px: f64,
+    pub polar_step: f64,
+    pub zoom_speed: f64,
+    pub zoom_to_cursor: bool,
+    pub invert_zoom: bool,
+    pub crosshair: bool,
+    pub pick_box: f64,
+    pub show_lineweights: bool,
+    pub lineweight_scale: f64,
+    pub grid_dots: bool,
+    pub grid_major_every: u32,
+    pub grid_minor_rgb: (u8, u8, u8),
+    pub grid_major_rgb: (u8, u8, u8),
     pub text_font: Option<String>,
 }
 
@@ -86,17 +127,37 @@ impl Default for UiPrefs {
             dyn_on: true,
             comb_on: false,
             comb_scale: 5.0,
+            snap_px: 12.0,
+            polar_step: 45.0,
+            zoom_speed: 1.0,
+            zoom_to_cursor: true,
+            invert_zoom: false,
+            crosshair: true,
+            pick_box: 11.0,
+            show_lineweights: true,
+            lineweight_scale: 5.0,
+            grid_dots: false,
+            grid_major_every: 5,
+            grid_minor_rgb: (24, 28, 36),
+            grid_major_rgb: (33, 39, 49),
             text_font: None,
         }
     }
 }
 
+/// Parse an `"r,g,b"` triple of 0–255 ints, used by the prefs colour fields.
+fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let p: Vec<u8> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+    (p.len() == 3).then(|| (p[0], p[1], p[2]))
+}
+
 impl UiPrefs {
     pub fn serialize(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
+        let rgb = |c: (u8, u8, u8)| format!("{},{},{}", c.0, c.1, c.2);
         let font = self.text_font.as_deref().unwrap_or("");
         format!(
-            "snap={}\ngrid={}\ngsnap={}\northo={}\npolar={}\ntrack={}\ndyn={}\ncomb={}\ncomb_scale={}\nfont={}\n",
+            "snap={}\ngrid={}\ngsnap={}\northo={}\npolar={}\ntrack={}\ndyn={}\ncomb={}\ncomb_scale={}\nsnap_px={}\npolar_step={}\nzoom_speed={}\nzoom_cursor={}\ninvert_zoom={}\ncrosshair={}\npick_box={}\nlw_show={}\nlw_scale={}\ngrid_dots={}\ngrid_major={}\ngrid_minor={}\ngrid_majorc={}\nfont={}\n",
             b(self.snap_on),
             b(self.grid_on),
             b(self.grid_snap_on),
@@ -106,6 +167,19 @@ impl UiPrefs {
             b(self.dyn_on),
             b(self.comb_on),
             self.comb_scale,
+            self.snap_px,
+            self.polar_step,
+            self.zoom_speed,
+            b(self.zoom_to_cursor),
+            b(self.invert_zoom),
+            b(self.crosshair),
+            self.pick_box,
+            b(self.show_lineweights),
+            self.lineweight_scale,
+            b(self.grid_dots),
+            self.grid_major_every,
+            rgb(self.grid_minor_rgb),
+            rgb(self.grid_major_rgb),
             font,
         )
     }
@@ -131,6 +205,51 @@ impl UiPrefs {
                         p.comb_scale = f;
                     }
                 }
+                "snap_px" => {
+                    if let Ok(f) = v.trim().parse::<f64>() {
+                        p.snap_px = f.clamp(2.0, 40.0);
+                    }
+                }
+                "polar_step" => {
+                    if let Ok(f) = v.trim().parse::<f64>() {
+                        p.polar_step = f.clamp(1.0, 90.0);
+                    }
+                }
+                "zoom_speed" => {
+                    if let Ok(f) = v.trim().parse::<f64>() {
+                        p.zoom_speed = f.clamp(0.25, 4.0);
+                    }
+                }
+                "zoom_cursor" => p.zoom_to_cursor = on,
+                "invert_zoom" => p.invert_zoom = on,
+                "crosshair" => p.crosshair = on,
+                "pick_box" => {
+                    if let Ok(f) = v.trim().parse::<f64>() {
+                        p.pick_box = f.clamp(5.0, 30.0);
+                    }
+                }
+                "lw_show" => p.show_lineweights = on,
+                "lw_scale" => {
+                    if let Ok(f) = v.trim().parse::<f64>() {
+                        p.lineweight_scale = f.clamp(1.0, 20.0);
+                    }
+                }
+                "grid_dots" => p.grid_dots = on,
+                "grid_major" => {
+                    if let Ok(n) = v.trim().parse::<u32>() {
+                        p.grid_major_every = n.clamp(2, 20);
+                    }
+                }
+                "grid_minor" => {
+                    if let Some(c) = parse_rgb(v) {
+                        p.grid_minor_rgb = c;
+                    }
+                }
+                "grid_majorc" => {
+                    if let Some(c) = parse_rgb(v) {
+                        p.grid_major_rgb = c;
+                    }
+                }
                 "font" => p.text_font = (!v.is_empty()).then(|| v.to_string()),
                 _ => {}
             }
@@ -152,6 +271,19 @@ impl AppState {
             dyn_on: self.dyn_on,
             comb_on: self.comb_on,
             comb_scale: self.comb_scale,
+            snap_px: self.snap_px,
+            polar_step: self.polar_step,
+            zoom_speed: self.zoom_speed,
+            zoom_to_cursor: self.zoom_to_cursor,
+            invert_zoom: self.invert_zoom,
+            crosshair: self.crosshair,
+            pick_box: self.pick_box,
+            show_lineweights: self.show_lineweights,
+            lineweight_scale: self.lineweight_scale,
+            grid_dots: self.grid_dots,
+            grid_major_every: self.grid_major_every,
+            grid_minor_rgb: self.grid_minor_rgb,
+            grid_major_rgb: self.grid_major_rgb,
             text_font: self.text_font.clone(),
         }
     }
@@ -167,6 +299,19 @@ impl AppState {
         self.dyn_on = p.dyn_on;
         self.comb_on = p.comb_on;
         self.comb_scale = p.comb_scale;
+        self.snap_px = p.snap_px;
+        self.polar_step = p.polar_step;
+        self.zoom_speed = p.zoom_speed;
+        self.zoom_to_cursor = p.zoom_to_cursor;
+        self.invert_zoom = p.invert_zoom;
+        self.crosshair = p.crosshair;
+        self.pick_box = p.pick_box;
+        self.show_lineweights = p.show_lineweights;
+        self.lineweight_scale = p.lineweight_scale;
+        self.grid_dots = p.grid_dots;
+        self.grid_major_every = p.grid_major_every;
+        self.grid_minor_rgb = p.grid_minor_rgb;
+        self.grid_major_rgb = p.grid_major_rgb;
         self.text_font = p.text_font.clone();
         // Ortho and polar are mutually exclusive; if a stale state has both on,
         // let ortho win (it's the more restrictive constraint).
@@ -276,7 +421,21 @@ impl AppState {
             default_line_weight: LineWeight::ByLayer,
             comb_on: false,
             comb_scale: 5.0,
+            snap_px: 12.0,
+            polar_step: 45.0,
+            zoom_speed: 1.0,
+            zoom_to_cursor: true,
+            invert_zoom: false,
+            crosshair: true,
+            pick_box: 11.0,
+            show_lineweights: true,
+            lineweight_scale: 5.0,
+            grid_dots: false,
+            grid_major_every: 5,
+            grid_minor_rgb: (24, 28, 36),
+            grid_major_rgb: (33, 39, 49),
             clipboard: Vec::new(),
+            hint_tool: None,
         }
     }
 
@@ -382,7 +541,7 @@ impl AppState {
 
         self.active_snap = if self.snap_on && allow_snap {
             let mut s = self.snap.clone();
-            s.tolerance = self.view.pixel_world_size() * 12.0;
+            s.tolerance = self.view.pixel_world_size() * self.snap_px;
             let ref_pt = self.tool.reference_point().map(|p| p.to_f64());
             match dragged_entity {
                 // Skip the entity being edited (all snap kinds) so a grip never
@@ -433,12 +592,13 @@ impl AppState {
                 if self.polar_on && dist > 1e-4 {
                     let angle_rad = dy.atan2(dx);
                     let angle_deg_wrapped = eiderflat_geometry::wrap_deg360(angle_rad.to_degrees());
-                    let nearest_45 = (angle_deg_wrapped / 45.0).round() * 45.0;
-                    let diff = (angle_deg_wrapped - nearest_45).abs();
+                    let step = self.polar_step.max(1.0);
+                    let nearest = (angle_deg_wrapped / step).round() * step;
+                    let diff = (angle_deg_wrapped - nearest).abs();
                     let diff = diff.min(360.0 - diff);
 
                     if diff <= 3.0 {
-                        let snapped_rad = nearest_45.to_radians();
+                        let snapped_rad = nearest.to_radians();
                         self.cursor_world =
                             (rx + dist * snapped_rad.cos(), ry + dist * snapped_rad.sin());
                         self.interaction.active_guide = Some(((rx, ry), snapped_rad));
@@ -1367,6 +1527,99 @@ impl AppState {
         if let Some(e) = self.document.get_mut(id) {
             e.kind = edited;
         }
+        self.reconstrain_tangency(id);
+    }
+
+    /// Re-solve a tangent-constrained circle so it stays tangent to its target
+    /// entities after a grip edit. 3 targets fully fix the circle; 2 leave the
+    /// radius free (re-solve the centre for the dragged radius); 1 keeps the
+    /// circle touching as the centre moves (radius = distance to the target).
+    fn reconstrain_tangency(&mut self, id: EntityId) {
+        let Some(e) = self.document.get(id) else {
+            return;
+        };
+        if e.tangents.is_empty() {
+            return;
+        }
+        let Some(Curve::Arc(arc)) = e.as_curve() else {
+            return;
+        };
+        let (center, radius) = (arc.center, arc.radius);
+        let tangents = e.tangents.clone();
+        let curves: Vec<Curve> = tangents
+            .iter()
+            .filter_map(|tr| {
+                self.document
+                    .get(tr.target)
+                    .and_then(|t| t.as_curve())
+                    .cloned()
+            })
+            .collect();
+        if curves.len() != tangents.len() {
+            return; // a target was deleted — leave the circle as the grip left it
+        }
+        let solved = match curves.len() {
+            3 => eiderflat_geometry::tangent_circle_ttt(&curves[0], &curves[1], &curves[2], center),
+            2 => eiderflat_geometry::tangent_circle_ttr(&curves[0], &curves[1], radius, center),
+            1 => {
+                let r = eiderflat_geometry::point_to_curve_distance(&curves[0], center.x, center.y);
+                (r > 1e-9).then_some((center, r))
+            }
+            _ => None,
+        };
+        if let Some((c, r)) = solved
+            && r > 1e-9
+            && let Some(e) = self.document.get_mut(id)
+        {
+            e.kind = EntityKind::Curve(Curve::Arc(eiderflat_geometry::CircularArc::new(
+                c,
+                r,
+                0.0,
+                std::f64::consts::TAU,
+            )));
+        }
+    }
+
+    /// Remove the tangency constraint on `id` whose index is `which` (the user
+    /// clicked its tangent icon). The circle keeps its current geometry.
+    pub fn remove_tangent(&mut self, id: EntityId, which: usize) {
+        self.history.snapshot(&self.document);
+        if let Some(e) = self.document.get_mut(id)
+            && which < e.tangents.len()
+        {
+            e.tangents.remove(which);
+        }
+    }
+
+    /// Tangent constraints of `id` paired with the tangent point on the circle
+    /// (the point on the circle nearest each target), for drawing/clicking icons.
+    pub fn tangent_markers(&self, id: EntityId) -> Vec<(usize, Point2d)> {
+        let Some(e) = self.document.get(id) else {
+            return vec![];
+        };
+        let Some(Curve::Arc(arc)) = e.as_curve() else {
+            return vec![];
+        };
+        e.tangents
+            .iter()
+            .enumerate()
+            .filter_map(|(i, tr)| {
+                let target = self.document.get(tr.target)?.as_curve()?;
+                let (cx, cy) = arc.center.to_f64();
+                // Tangent point = where the line centre→(closest point on target)
+                // crosses the circle.
+                let foot = eiderflat_geometry::project_point_onto_curve(target, cx, cy).point;
+                let (fx, fy) = foot;
+                let (dx, dy) = (fx - cx, fy - cy);
+                let len = (dx * dx + dy * dy).sqrt();
+                let tp = if len > 1e-9 {
+                    Point2d::from_f64(cx + dx / len * arc.radius, cy + dy / len * arc.radius)
+                } else {
+                    Point2d::from_f64(fx, fy)
+                };
+                Some((i, tp))
+            })
+            .collect()
     }
 
     pub fn end_grip_drag(&mut self) {
@@ -1400,6 +1653,7 @@ impl AppState {
         if let Some(e) = self.document.get_mut(id) {
             e.kind = edited;
         }
+        self.reconstrain_tangency(id);
         self.interaction.grip_drag = None;
     }
 
@@ -1434,6 +1688,46 @@ mod tests {
 
     fn line(x0: i64, y0: i64, x1: i64, y1: i64) -> EntityKind {
         EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(pt(x0, y0), pt(x1, y1))))
+    }
+
+    #[test]
+    fn tangent_markers_and_removal() {
+        use eiderflat_geometry::CircularArc;
+        let mut a = app();
+        a.snap_on = false;
+        // Two axes and a radius-2 circle at (2,2) tangent to both.
+        let l1 = a.document.add(line(0, 0, 10, 0));
+        let l2 = a.document.add(line(0, 0, 0, 10));
+        let cid = a
+            .document
+            .add(EntityKind::Curve(Curve::Arc(CircularArc::new(
+                Point2d::from_f64(2.0, 2.0),
+                2.0,
+                0.0,
+                std::f64::consts::TAU,
+            ))));
+        if let Some(e) = a.document.get_mut(cid) {
+            e.tangents = vec![
+                eiderflat_document::TangentRef {
+                    target: l1,
+                    near: Point2d::from_f64(2.0, 0.0),
+                },
+                eiderflat_document::TangentRef {
+                    target: l2,
+                    near: Point2d::from_f64(0.0, 2.0),
+                },
+            ];
+        }
+        a.selection = vec![cid];
+        // Two tangent markers, sitting on the circle (radius 2 from the centre).
+        let markers = a.tangent_markers(cid);
+        assert_eq!(markers.len(), 2);
+        for (_, p) in &markers {
+            assert!((p.dist_f64(&Point2d::from_f64(2.0, 2.0)) - 2.0).abs() < 1e-6);
+        }
+        // Clicking one icon removes that constraint.
+        a.remove_tangent(cid, 0);
+        assert_eq!(a.tangent_markers(cid).len(), 1);
     }
 
     #[test]
@@ -1493,6 +1787,19 @@ mod tests {
             dyn_on: true,
             comb_on: true,
             comb_scale: 7.5,
+            snap_px: 8.0,
+            polar_step: 30.0,
+            zoom_speed: 1.5,
+            zoom_to_cursor: false,
+            invert_zoom: true,
+            crosshair: false,
+            pick_box: 14.0,
+            show_lineweights: false,
+            lineweight_scale: 3.0,
+            grid_dots: true,
+            grid_major_every: 4,
+            grid_minor_rgb: (20, 30, 40),
+            grid_major_rgb: (50, 60, 70),
             text_font: Some("Arial".into()),
         };
         assert_eq!(UiPrefs::deserialize(&p.serialize()), p);

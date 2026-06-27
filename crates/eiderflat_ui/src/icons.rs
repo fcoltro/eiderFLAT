@@ -36,6 +36,7 @@ pub enum Icon {
     Pan,
     AddLayer,
     Delete,
+    Dimension,
 }
 
 impl Icon {
@@ -75,6 +76,8 @@ impl Icon {
             Icon::Pan => include_str!("../assets/icons/ui_pan.svg"),
             Icon::AddLayer => include_str!("../assets/icons/ui_add_layer.svg"),
             Icon::Delete => include_str!("../assets/icons/ui_delete.svg"),
+            // No SVG asset — drawn programmatically in `draw`.
+            Icon::Dimension => return None,
         })
     }
 }
@@ -874,6 +877,28 @@ impl Icon {
                     thin,
                     egui::StrokeKind::Middle,
                 );
+            }
+
+            Icon::Dimension => {
+                let (lx, rx, y) = (0.16, 0.84, 0.64);
+                // Extension lines.
+                painter.line_segment([p(r, lx, 0.26), p(r, lx, 0.80)], thin);
+                painter.line_segment([p(r, rx, 0.26), p(r, rx, 0.80)], thin);
+                // Dimension line with outward arrowheads.
+                let a = p(r, lx, y);
+                let b = p(r, rx, y);
+                painter.line_segment([a, b], s);
+                let ah = r.width() * 0.16;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![a, a + vec2(ah, -ah * 0.5), a + vec2(ah, ah * 0.5)],
+                    color,
+                    Stroke::NONE,
+                ));
+                painter.add(egui::Shape::convex_polygon(
+                    vec![b, b + vec2(-ah, -ah * 0.5), b + vec2(-ah, ah * 0.5)],
+                    color,
+                    Stroke::NONE,
+                ));
             }
 
             Icon::Pan | Icon::AddLayer | Icon::Delete => {}

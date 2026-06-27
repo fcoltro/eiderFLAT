@@ -706,7 +706,7 @@ mod tests {
         // Dimension geometry + value text both make it into the SVG.
         assert!(svg.contains("<line"), "dimension lines exported");
         assert!(svg.contains("<text"), "dimension value text exported");
-        assert!(svg.contains('\u{2300}'), "diameter symbol in the label");
+        assert!(svg.contains('\u{00d8}'), "diameter symbol in the label");
     }
 
     #[test]

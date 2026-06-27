@@ -52,13 +52,6 @@ pub enum Tool {
         p1: Option<Point2d>,
         p2: Option<Point2d>,
     },
-    /// Axis-locked linear dimension (horizontal when `vertical` is false): pick
-    /// two points, then the dimension-line offset.
-    DimOrtho {
-        vertical: bool,
-        p1: Option<Point2d>,
-        p2: Option<Point2d>,
-    },
     /// Angular dimension: pick the vertex, a point on each ray, then the arc
     /// location. `pts` accumulates [vertex, ray1, ray2]; the 4th click places it.
     DimAngular {
@@ -176,8 +169,6 @@ impl Tool {
             Tool::CircleTtt { .. } => "CIRCLE TTT",
             Tool::TangentLine { .. } => "TANGENT",
             Tool::Dimension { .. } => "DIMENSION",
-            Tool::DimOrtho { vertical: true, .. } => "DIM VERTICAL",
-            Tool::DimOrtho { .. } => "DIM HORIZONTAL",
             Tool::DimAngular { .. } => "DIM ANGULAR",
             Tool::DimAngularLines { .. } => "DIM ANGULAR (2 lines)",
             Tool::DimRadial { diameter: true, .. } => "DIM DIAMETER",
@@ -367,44 +358,28 @@ impl Tool {
                 }
                 (Some(a), Some(b)) => {
                     *self = Tool::Dimension { p1: None, p2: None };
-                    ToolEvent::Create(vec![EntityKind::Dimension {
-                        p1: a,
-                        p2: b,
-                        line: p,
-                        height: 2.5,
-                        override_text: None,
-                    }])
-                }
-            },
-
-            Tool::DimOrtho { vertical, p1, p2 } => {
-                let vert = *vertical;
-                match (*p1, *p2) {
-                    (None, _) => {
-                        *p1 = Some(p);
-                        ToolEvent::Pending
-                    }
-                    (Some(_), None) => {
-                        *p2 = Some(p);
-                        ToolEvent::Pending
-                    }
-                    (Some(a), Some(b)) => {
-                        *self = Tool::DimOrtho {
-                            vertical: vert,
-                            p1: None,
-                            p2: None,
-                        };
-                        ToolEvent::Create(vec![EntityKind::OrthoDim {
+                    // Smart orientation: the placement point decides aligned vs
+                    // horizontal vs vertical (see `linear_orientation`).
+                    let kind = match eiderflat_document::linear_orientation(a, b, p) {
+                        None => EntityKind::Dimension {
                             p1: a,
                             p2: b,
                             line: p,
-                            vertical: vert,
                             height: 2.5,
                             override_text: None,
-                        }])
-                    }
+                        },
+                        Some(vertical) => EntityKind::OrthoDim {
+                            p1: a,
+                            p2: b,
+                            line: p,
+                            vertical,
+                            height: 2.5,
+                            override_text: None,
+                        },
+                    };
+                    ToolEvent::Create(vec![kind])
                 }
-            }
+            },
 
             Tool::DimAngular { pts } => {
                 // Collect vertex, ray-1 point, ray-2 point; the 4th click places
@@ -715,10 +690,6 @@ impl Tool {
                 *p1 = None;
                 *p2 = None;
             }
-            Tool::DimOrtho { p1, p2, .. } => {
-                *p1 = None;
-                *p2 = None;
-            }
             Tool::DimAngular { pts } => pts.clear(),
             Tool::DimAngularLines { a, geom } => {
                 *a = None;
@@ -771,7 +742,6 @@ impl Tool {
             Tool::CircleTtt { picks } => !picks.is_empty(),
             Tool::TangentLine { first } => first.is_some(),
             Tool::Dimension { p1, .. } => p1.is_some(),
-            Tool::DimOrtho { p1, .. } => p1.is_some(),
             Tool::DimAngular { pts } => !pts.is_empty(),
             Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
             Tool::DimRadial { center, .. } => center.is_some(),
@@ -984,7 +954,6 @@ impl Tool {
                 _ => None,
             },
             Tool::Dimension { p1, p2 } => (*p2).or(*p1),
-            Tool::DimOrtho { p1, p2, .. } => (*p2).or(*p1),
             Tool::DimAngular { pts } => pts.last().cloned(),
             Tool::DimAngularLines { geom, .. } => geom.map(|(v, _, _)| v),
             Tool::DimRadial { center, .. } => *center,

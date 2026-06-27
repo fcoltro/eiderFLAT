@@ -45,6 +45,29 @@ pub fn angular_sweep(center: Point2d, p1: Point2d, p2: Point2d, line: Point2d) -
     }
 }
 
+/// Pick the orientation of a smart linear dimension from where the dimension
+/// line is being placed relative to the two measured points:
+/// - `None` → **aligned** (parallel to `p1`→`p2`); the dimension line is dragged
+///   off diagonally.
+/// - `Some(false)` → **horizontal** (measures the X distance); dragged above/below.
+/// - `Some(true)` → **vertical** (measures the Y distance); dragged to the side.
+///
+/// The 2:1 dominance threshold gives each orthogonal direction a clear zone while
+/// leaving a diagonal cone for aligned.
+pub fn linear_orientation(p1: Point2d, p2: Point2d, line: Point2d) -> Option<bool> {
+    let mid = p1.midpoint(&p2);
+    let (mx, my) = mid.to_f64();
+    let (lx, ly) = line.to_f64();
+    let (ox, oy) = ((lx - mx).abs(), (ly - my).abs());
+    if ox > 2.0 * oy {
+        Some(true) // placed to the side → vertical dimension
+    } else if oy > 2.0 * ox {
+        Some(false) // placed above/below → horizontal dimension
+    } else {
+        None // diagonal → aligned
+    }
+}
+
 /// The numeric quantity a dimension measures: length for linear/ortho, degrees
 /// for angular, radius for radial, diameter for a radial flagged `diameter`.
 /// `None` for non-dimension entities.
@@ -96,7 +119,7 @@ pub fn label_text(kind: &EntityKind, style: &DimStyle, units: Units) -> Option<S
     Some(match kind {
         EntityKind::AngularDim { .. } => format!("{value:.*}\u{00b0}", style.precision),
         EntityKind::RadialDim { diameter, .. } => {
-            let prefix = if *diameter { "\u{2300}" } else { "R" };
+            let prefix = if *diameter { "\u{00d8}" } else { "R" };
             format!("{prefix}{}", units.format_measure(value, style.precision))
         }
         _ => units.format_measure(value, style.precision),

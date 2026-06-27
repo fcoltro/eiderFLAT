@@ -95,6 +95,15 @@ pub enum EntityKind {
     },
 }
 
+/// A tangency constraint on a circle: it stays tangent to entity `target`, with
+/// `near` a hint point (the original pick) used to keep the same solution/side
+/// when the circle is re-solved during editing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TangentRef {
+    pub target: EntityId,
+    pub near: Point2d,
+}
+
 #[derive(Clone, Debug)]
 pub struct Entity {
     pub id: EntityId,
@@ -105,6 +114,9 @@ pub struct Entity {
     pub line_weight: LineWeight,
     pub transparency: f64,
     pub xdata: XData,
+    /// Tangency constraints (currently only circles created by TTR/TTT). Editing a
+    /// constrained circle re-solves it to stay tangent to these targets.
+    pub tangents: Vec<TangentRef>,
 }
 
 impl Entity {
@@ -118,6 +130,7 @@ impl Entity {
             line_weight: LineWeight::ByLayer,
             transparency: 0.0,
             xdata: XData::default(),
+            tangents: Vec::new(),
         }
     }
 
@@ -164,6 +177,9 @@ impl Entity {
     }
 
     pub fn transform(&mut self, t: &Transform2d) {
+        // A free transform (move/rotate/scale/mirror) repositions the circle off
+        // its tangent lines, so the in-place tangency no longer holds — drop it.
+        self.tangents.clear();
         self.kind = match &self.kind {
             EntityKind::Curve(c) => EntityKind::Curve(t.apply_curve(c)),
             EntityKind::Point(p) => EntityKind::Point(t.apply_point(p)),

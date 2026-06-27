@@ -54,6 +54,8 @@ pub struct UiState {
     pub dyn_ell_active: bool,
     pub dyn_offset_dist: String,
     pub dyn_offset_active: bool,
+    pub dyn_corner_val: String,
+    pub dyn_corner_active: bool,
     pub dyn_text_content: String,
     pub dyn_text_active: bool,
     pub corner_input: String,
@@ -163,14 +165,17 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             let (wx, wy) = app
                 .view
                 .screen_to_world((p.x - origin.x) as f64, (p.y - origin.y) as f64);
-            if let Some(id) =
-                eiderflat_cad::pick_at(&app.document, wx, wy, app.view.pixel_world_size() * 6.0)
-                && let Some(EntityKind::Text {
-                    content,
-                    font,
-                    height,
-                    ..
-                }) = app.document.get(id).map(|e| &e.kind)
+            if let Some(id) = eiderflat_cad::pick_at(
+                &app.document,
+                wx,
+                wy,
+                app.view.pixel_world_size() * app.pick_box * 0.5,
+            ) && let Some(EntityKind::Text {
+                content,
+                font,
+                height,
+                ..
+            }) = app.document.get(id).map(|e| &e.kind)
             {
                 ui_state.editing_text = Some(id);
                 ui_state.text_edit_buf = content.clone();
@@ -290,6 +295,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         overlays::dyn_polygon_hud(ctx, app, ui_state, origin);
         overlays::dyn_ellipse_hud(ctx, app, ui_state, origin);
         overlays::dyn_offset_hud(ctx, app, ui_state, origin);
+        overlays::dyn_corner_hud(ctx, app, ui_state, origin);
         overlays::dyn_text_hud(ctx, app, ui_state, origin);
         overlays::cursor_readout(ctx, app, origin);
         let has_own_grips = !app.selection_grips().is_empty();
@@ -380,19 +386,37 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             && response.clicked()
         {
             const GRIP_HIT: f32 = 8.0;
-            let grips = app.selection_grips();
-            let hit = response.interact_pointer_pos().and_then(|c| {
-                grips.iter().position(|(_, g)| {
-                    let (sx, sy) = app.view.world_to_screen(g.world.x, g.world.y);
-                    let gp = pos2(origin.x + sx as f32, origin.y + sy as f32);
-                    (gp - c).length() <= GRIP_HIT
-                })
-            });
-            if let Some(idx) = hit {
-                let (eid, grip) = grips[idx];
-                app.begin_grip_drag(eid, grip);
-                ui_state.grip_input.clear();
+            // Clicking a tangent icon on a constrained circle deletes that
+            // constraint — checked before grips so it takes priority.
+            let tan_hit = (app.selection.len() == 1)
+                .then(|| app.selection[0])
+                .and_then(|id| {
+                    response.interact_pointer_pos().and_then(|c| {
+                        app.tangent_markers(id).into_iter().find_map(|(i, tp)| {
+                            let (sx, sy) = app.view.world_to_screen(tp.x, tp.y);
+                            let gp = pos2(origin.x + sx as f32, origin.y + sy as f32);
+                            ((gp - c).length() <= 9.0).then_some((id, i))
+                        })
+                    })
+                });
+            if let Some((id, which)) = tan_hit {
+                app.remove_tangent(id, which);
                 grip_consumed_click = true;
+            } else {
+                let grips = app.selection_grips();
+                let hit = response.interact_pointer_pos().and_then(|c| {
+                    grips.iter().position(|(_, g)| {
+                        let (sx, sy) = app.view.world_to_screen(g.world.x, g.world.y);
+                        let gp = pos2(origin.x + sx as f32, origin.y + sy as f32);
+                        (gp - c).length() <= GRIP_HIT
+                    })
+                });
+                if let Some(idx) = hit {
+                    let (eid, grip) = grips[idx];
+                    app.begin_grip_drag(eid, grip);
+                    ui_state.grip_input.clear();
+                    grip_consumed_click = true;
+                }
             }
         }
         if app.grip_editing() {
@@ -522,6 +546,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 || f == Some(egui::Id::new("dyn_ell_major"))
                 || f == Some(egui::Id::new("dyn_ell_minor"))
                 || f == Some(egui::Id::new("dyn_offset_dist"))
+                || f == Some(egui::Id::new("dyn_corner_val"))
                 || f == Some(egui::Id::new("dyn_text_field"))
                 || f == Some(egui::Id::new("palette_input"))
         };
@@ -542,7 +567,12 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     let (wx, wy) = app
                         .view
                         .screen_to_world((p.x - origin.x) as f64, (p.y - origin.y) as f64);
-                    eiderflat_cad::pick_at(&app.document, wx, wy, app.view.pixel_world_size() * 6.0)
+                    eiderflat_cad::pick_at(
+                        &app.document,
+                        wx,
+                        wy,
+                        app.view.pixel_world_size() * app.pick_box * 0.5,
+                    )
                 })
                 .filter(|&id| id != app.origin_id)
                 .filter(|&id| {
@@ -723,6 +753,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             || focused_id == Some(egui::Id::new("dyn_ell_major"))
             || focused_id == Some(egui::Id::new("dyn_ell_minor"))
             || focused_id == Some(egui::Id::new("dyn_offset_dist"))
+            || focused_id == Some(egui::Id::new("dyn_corner_val"))
             || focused_id == Some(egui::Id::new("dyn_text_field"))
             || focused_id == Some(egui::Id::new("palette_input"));
         let poly_focus_armed = egui::Id::new("polygon_sides_focus_armed");
@@ -816,8 +847,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.0 {
-                let factor = (scroll as f64 / 200.0).exp();
-                let (wx, wy) = app.cursor_world;
+                let signed = if app.invert_zoom { -scroll } else { scroll };
+                let factor = (signed as f64 / 200.0 * app.zoom_speed).exp();
+                let (wx, wy) = if app.zoom_to_cursor {
+                    app.cursor_world
+                } else {
+                    app.view.center
+                };
                 app.view.zoom_at(wx, wy, factor);
                 app.zoom_target = None;
             }
@@ -994,6 +1030,37 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         crate::theme::CANVAS_BG,
                     );
                     painter.rect_filled(egui::Rect::from_center_size(p, vec2(8.0, 8.0)), 2.0, col);
+                }
+            }
+        }
+        // Tangency badges on a selected constrained circle — a small "circle +
+        // tangent line" glyph at each tangent point; click one to drop it.
+        if app.selection.len() == 1 {
+            let id = app.selection[0];
+            let hoverp = response.hover_pos();
+            for (_, tp) in app.tangent_markers(id) {
+                let p = to_screen(tp.x, tp.y);
+                let hot = hoverp.map(|h| (h - p).length() <= 9.0).unwrap_or(false);
+                let col = if hot {
+                    Color32::from_rgb(255, 176, 32)
+                } else {
+                    crate::theme::ACCENT_BRIGHT
+                };
+                painter.circle_filled(p, 8.0, Color32::from_rgba_unmultiplied(20, 26, 36, 235));
+                painter.circle_stroke(p, 8.0, Stroke::new(1.0, crate::theme::OUTLINE));
+                painter.circle_stroke(p, 3.2, Stroke::new(1.4, col));
+                painter.line_segment(
+                    [p + vec2(-5.0, 5.2), p + vec2(5.0, 5.2)],
+                    Stroke::new(1.4, col),
+                );
+                if hot {
+                    painter.text(
+                        p + vec2(0.0, -12.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        "click to remove tangency",
+                        egui::FontId::proportional(11.0),
+                        Color32::from_rgb(255, 200, 120),
+                    );
                 }
             }
         }
@@ -1247,19 +1314,20 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 .map(|l| Color32::from_rgb(l.color.0, l.color.1, l.color.2))
                 .unwrap_or(Color32::from_rgb(46, 204, 113));
             match &app.tool {
-                // Linear: once both points are placed, the cursor sets the offset.
+                // Smart linear: the cursor both sets the offset and picks the
+                // orientation (aligned / horizontal / vertical), so the preview
+                // shows exactly what the next click will create.
                 Tool::Dimension {
                     p1: Some(a),
                     p2: Some(b),
-                } => draw_dimension(&painter, app, *a, *b, cursor, None, &to_screen, dim_col),
-                // Axis-locked linear: same, with the horizontal/vertical lock.
-                Tool::DimOrtho {
-                    vertical,
-                    p1: Some(a),
-                    p2: Some(b),
-                } => render::draw_ortho_dim(
-                    &painter, app, *a, *b, cursor, *vertical, None, &to_screen, dim_col,
-                ),
+                } => match eiderflat_document::linear_orientation(*a, *b, cursor) {
+                    None => {
+                        draw_dimension(&painter, app, *a, *b, cursor, None, &to_screen, dim_col)
+                    }
+                    Some(vertical) => render::draw_ortho_dim(
+                        &painter, app, *a, *b, cursor, vertical, None, &to_screen, dim_col,
+                    ),
+                },
                 // Angular: with the vertex + both ray points placed, the cursor
                 // positions the dimension arc.
                 Tool::DimAngular { pts } if pts.len() == 3 => {
@@ -1319,8 +1387,18 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         } else if over_canvas {
             ui.ctx().set_cursor_icon(egui::CursorIcon::None);
             let cross = Stroke::new(1.0, Color32::from_rgb(140, 150, 170));
-            painter.line_segment([pos2(rect.left(), cc.y), pos2(rect.right(), cc.y)], cross);
-            painter.line_segment([pos2(cc.x, rect.top()), pos2(cc.x, rect.bottom())], cross);
+            if app.crosshair {
+                painter.line_segment([pos2(rect.left(), cc.y), pos2(rect.right(), cc.y)], cross);
+                painter.line_segment([pos2(cc.x, rect.top()), pos2(cc.x, rect.bottom())], cross);
+            } else {
+                // Short cursor ticks around a central gap when the full crosshair
+                // is turned off.
+                let (gap, arm) = (app.pick_box as f32 * 0.6, app.pick_box as f32 * 1.6);
+                painter.line_segment([cc - vec2(arm, 0.0), cc - vec2(gap, 0.0)], cross);
+                painter.line_segment([cc + vec2(gap, 0.0), cc + vec2(arm, 0.0)], cross);
+                painter.line_segment([cc - vec2(0.0, arm), cc - vec2(0.0, gap)], cross);
+                painter.line_segment([cc + vec2(0.0, gap), cc + vec2(0.0, arm)], cross);
+            }
             // The polar/ortho guide is drawn after the crosshair so a horizontal
             // or vertical guide isn't painted over by it (the crosshair shares
             // those exact pixels; diagonal guides like 45° never collided).
@@ -1344,7 +1422,10 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     Stroke::new(1.4, Color32::from_rgb(255, 176, 32))
                 };
                 painter.rect_stroke(
-                    egui::Rect::from_center_size(cc, vec2(11.0, 11.0)),
+                    egui::Rect::from_center_size(
+                        cc,
+                        vec2(app.pick_box as f32, app.pick_box as f32),
+                    ),
                     0.0,
                     box_stroke,
                     egui::StrokeKind::Middle,

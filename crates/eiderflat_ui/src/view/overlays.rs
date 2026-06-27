@@ -615,6 +615,93 @@ pub(super) fn dyn_offset_hud(
         ui_state.dyn_offset_active = false;
     }
 }
+/// Radius/distance entry for the Fillet and Chamfer tools — a field at the cursor
+/// so the value can be typed before (or between) the two picks, like Offset.
+pub(super) fn dyn_corner_hud(
+    ctx: &egui::Context,
+    app: &mut AppState,
+    ui_state: &mut UiState,
+    origin: egui::Pos2,
+) {
+    // (label, current value) for whichever value-then-pick tool is active.
+    let info = match &app.tool {
+        Tool::Fillet { radius, .. } => Some(("Radius", *radius)),
+        Tool::Chamfer { dist, .. } => Some(("Dist", *dist)),
+        Tool::CircleTtr { radius, .. } => Some(("Radius", *radius)),
+        _ => None,
+    };
+    let (Some((label, value)), true) = (info, app.dyn_on) else {
+        ui_state.dyn_corner_active = false;
+        return;
+    };
+
+    let first_show = !ui_state.dyn_corner_active;
+    if first_show {
+        ui_state.dyn_corner_val = format!("{value:.4}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string();
+    }
+    let id = egui::Id::new("dyn_corner_val");
+    let (crx, cry) = app.cursor_world;
+    let cur = app.view.world_to_screen(crx, cry);
+    let hud_pos = pos2(
+        origin.x + cur.0 as f32 + 18.0,
+        origin.y + cur.1 as f32 - 38.0,
+    );
+    egui::Area::new(egui::Id::new("dyn_corner_hud"))
+        .fixed_pos(hud_pos)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            corner_glass_frame().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(label)
+                            .size(12.0)
+                            .color(Color32::from_gray(170)),
+                    );
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut ui_state.dyn_corner_val)
+                            .id(id)
+                            .desired_width(58.0)
+                            .hint_text("value, then pick lines"),
+                    );
+                    let nothing_focused = ui.ctx().memory(|m| m.focused().is_none());
+                    if first_show || nothing_focused {
+                        r.request_focus();
+                    }
+                });
+            });
+        });
+    ui_state.dyn_corner_active = true;
+    // Push the typed value back into the tool so the pick uses it.
+    if let Ok(v) = ui_state.dyn_corner_val.trim().parse::<f64>()
+        && v > 1e-9
+    {
+        match &app.tool {
+            Tool::Fillet { first, .. } => {
+                app.tool = Tool::Fillet {
+                    radius: v,
+                    first: *first,
+                }
+            }
+            Tool::Chamfer { first, .. } => {
+                app.tool = Tool::Chamfer {
+                    dist: v,
+                    first: *first,
+                }
+            }
+            Tool::CircleTtr { first, .. } => {
+                app.tool = Tool::CircleTtr {
+                    radius: v,
+                    first: *first,
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(super) fn dyn_text_hud(
     ctx: &egui::Context,
     app: &mut AppState,

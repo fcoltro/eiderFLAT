@@ -94,19 +94,10 @@ pub fn parse_command(input: &str) -> Command {
         }
         "TTT" | "CIRCLETTT" => Command::Activate(Tool::CircleTtt { picks: vec![] }),
         "TANGENT" | "TAN" => Command::Activate(Tool::TangentLine { first: None }),
-        "DIMENSION" | "DIM" | "DIMLINEAR" | "DIMALIGNED" => {
-            Command::Activate(Tool::Dimension { p1: None, p2: None })
-        }
-        "DIMHORIZONTAL" | "DIMHOR" | "DIMHORIZ" => Command::Activate(Tool::DimOrtho {
-            vertical: false,
-            p1: None,
-            p2: None,
-        }),
-        "DIMVERTICAL" | "DIMVER" | "DIMVERT" => Command::Activate(Tool::DimOrtho {
-            vertical: true,
-            p1: None,
-            p2: None,
-        }),
+        // One smart linear dimension — aligned/horizontal/vertical is chosen by
+        // where the dimension line is placed, so every alias maps to it.
+        "DIMENSION" | "DIM" | "DIMLINEAR" | "DIMALIGNED" | "DIMHORIZONTAL" | "DIMHOR"
+        | "DIMVERTICAL" | "DIMVER" => Command::Activate(Tool::Dimension { p1: None, p2: None }),
         "DIMANGULAR" | "DIMANG" | "DIMANGLE" => Command::Activate(Tool::DimAngular { pts: vec![] }),
         "DIMANGLINES" | "DIMANG2" | "DIMANGL" => Command::Activate(Tool::DimAngularLines {
             a: None,

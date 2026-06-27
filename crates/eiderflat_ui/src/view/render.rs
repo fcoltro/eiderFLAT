@@ -5,11 +5,10 @@ use egui::{Color32, Stroke, pos2, vec2};
 use eiderflat_document::{Color, EntityId, EntityKind, LineTypeRef};
 use eiderflat_geometry::{Curve, CurveSegment, Point2d};
 
-/// Screen pixels per millimetre of line weight. Line weights are shown at a
-/// fixed on-screen scale (independent of zoom), like AutoCAD's lineweight
-/// display, so a heavy line reads as heavy at any zoom.
-const LW_PX_PER_MM: f32 = 5.0;
-/// Hairline width used when an entity has no assigned weight (the default).
+/// Hairline width used when an entity has no assigned weight (the default), or
+/// when line-weight display is turned off. Line weights are otherwise shown at a
+/// fixed on-screen scale (the `lineweight_scale` setting, px per mm), like
+/// AutoCAD's lineweight display, so a heavy line reads as heavy at any zoom.
 pub(super) const HAIRLINE_PX: f32 = 1.5;
 
 /// Selection highlight colour for a hatch — a saturated blue, distinct from the
@@ -85,16 +84,10 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
         Tool::Dimension { p1, p2 } => match (p1, p2) {
             (None, _) => "Specify first dimension point".into(),
             (Some(_), None) => "Specify second dimension point".into(),
-            (Some(_), Some(_)) => "Specify dimension line location".into(),
-        },
-        Tool::DimOrtho { vertical, p1, p2 } => {
-            let axis = if *vertical { "vertical" } else { "horizontal" };
-            match (p1, p2) {
-                (None, _) => format!("Specify first point ({axis})"),
-                (Some(_), None) => "Specify second point".into(),
-                (Some(_), Some(_)) => "Specify dimension line location".into(),
+            (Some(_), Some(_)) => {
+                "Place the dimension line — aside for vertical, above/below for horizontal".into()
             }
-        }
+        },
         Tool::DimAngular { pts } => match pts.len() {
             0 => "Specify the angle vertex".into(),
             1 => "Specify a point on the first side".into(),
@@ -277,34 +270,66 @@ pub(super) fn draw_grid(
         return;
     }
     let (x0, y0, x1, y1) = app.view.visible_bounds();
-    // Continuous grid lines (replacing the old dot grid). Every fifth line is
-    // emphasised; the world axes are brighter still.
-    let minor = Stroke::new(1.0, Color32::from_rgb(24, 28, 36));
-    let major_line = Stroke::new(1.0, Color32::from_rgb(33, 39, 49));
+    // Minor/major line colours come from settings; every Nth line is "major" and
+    // the world axes are brighter still.
+    let rgb = |c: (u8, u8, u8)| Color32::from_rgb(c.0, c.1, c.2);
+    let minor = Stroke::new(1.0, rgb(app.grid_minor_rgb));
+    let major_line = Stroke::new(1.0, rgb(app.grid_major_rgb));
     let axis = Stroke::new(1.0, Color32::from_rgb(58, 66, 80));
+    let every = app.grid_major_every.max(1) as i64;
 
-    // Index of the first/over-the-edge grid line, so we can tag every 5th one.
     let ix0 = (x0 / major).floor() as i64;
     let iy0 = (y0 / major).floor() as i64;
 
-    let mut i = ix0;
-    let mut gx = ix0 as f64 * major;
-    while gx <= x1 {
-        let sx = to_screen(gx, y0).x;
-        let stroke = if i % 5 == 0 { major_line } else { minor };
-        painter.line_segment([pos2(sx, rect.top()), pos2(sx, rect.bottom())], stroke);
-        i += 1;
-        gx += major;
-    }
-
-    let mut j = iy0;
-    let mut gy = iy0 as f64 * major;
-    while gy <= y1 {
-        let sy = to_screen(x0, gy).y;
-        let stroke = if j % 5 == 0 { major_line } else { minor };
-        painter.line_segment([pos2(rect.left(), sy), pos2(rect.right(), sy)], stroke);
-        j += 1;
-        gy += major;
+    if app.grid_dots {
+        // Dotted grid: a dot at every intersection, bigger on major crossings.
+        let mut i = ix0;
+        let mut gx = ix0 as f64 * major;
+        while gx <= x1 {
+            let major_col = i.rem_euclid(every) == 0;
+            let mut j = iy0;
+            let mut gy = iy0 as f64 * major;
+            while gy <= y1 {
+                let p = to_screen(gx, gy);
+                let (r, col) = if major_col && j.rem_euclid(every) == 0 {
+                    (1.4, major_line.color)
+                } else {
+                    (1.0, minor.color)
+                };
+                painter.circle_filled(p, r, col);
+                j += 1;
+                gy += major;
+            }
+            i += 1;
+            gx += major;
+        }
+    } else {
+        let mut i = ix0;
+        let mut gx = ix0 as f64 * major;
+        while gx <= x1 {
+            let sx = to_screen(gx, y0).x;
+            let stroke = if i.rem_euclid(every) == 0 {
+                major_line
+            } else {
+                minor
+            };
+            painter.line_segment([pos2(sx, rect.top()), pos2(sx, rect.bottom())], stroke);
+            i += 1;
+            gx += major;
+        }
+        let mut j = iy0;
+        let mut gy = iy0 as f64 * major;
+        while gy <= y1 {
+            let sy = to_screen(x0, gy).y;
+            let stroke = if j.rem_euclid(every) == 0 {
+                major_line
+            } else {
+                minor
+            };
+            painter.line_segment([pos2(rect.left(), sy), pos2(rect.right(), sy)], stroke);
+            j += 1;
+            gy += major;
+        }
     }
 
     // World axes on top of the grid.
@@ -534,6 +559,9 @@ pub(super) fn resolve_color(app: &AppState, e: &eiderflat_document::Entity) -> (
 /// (or its layer's weight when it is "by layer"). Falls back to a hairline when
 /// the effective weight is zero — the default "no weight" look.
 pub(super) fn resolve_line_weight_px(app: &AppState, e: &eiderflat_document::Entity) -> f32 {
+    if !app.show_lineweights {
+        return HAIRLINE_PX;
+    }
     let layer_mm = app
         .document
         .layers
@@ -541,7 +569,7 @@ pub(super) fn resolve_line_weight_px(app: &AppState, e: &eiderflat_document::Ent
         .map(|l| l.line_weight_mm)
         .unwrap_or(0.0);
     let mm = e.line_weight.to_mm(layer_mm) as f32;
-    (mm * LW_PX_PER_MM).max(HAIRLINE_PX)
+    (mm * app.lineweight_scale as f32).max(HAIRLINE_PX)
 }
 
 /// The dash pattern (screen px, sign-encoded) for an entity's line type,
@@ -1256,7 +1284,7 @@ pub(super) fn draw_radial_dim(
     }
 
     let value = if diameter { 2.0 * r } else { r };
-    let prefix = if diameter { "\u{2300}" } else { "R" };
+    let prefix = if diameter { "\u{00d8}" } else { "R" };
     let label = match ovr {
         Some(t) => t.to_string(),
         None => format!(
@@ -1267,18 +1295,16 @@ pub(super) fn draw_radial_dim(
     let text_px = (style.text_height as f32 * app.view.zoom as f32).clamp(9.0, 200.0);
     let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);
     let galley = painter.layout_no_wrap(label, font_id, color);
-    // Place text just beyond the edge along the leader direction.
-    let tip = (
-        ex + ux * (text_px as f64 * 0.4),
-        ey + uy * (text_px as f64 * 0.4),
-    );
-    let st = to_screen(tip.0, tip.1);
-    let off = if ux >= 0.0 {
+    // Anchor the label just past the leader's outer end, in screen space, so it
+    // stays attached to the leader tip at any zoom (no world-unit gap).
+    let leader_dir = (s_edge - s_near).normalized();
+    let anchor = s_edge + leader_dir * 6.0;
+    let off = if leader_dir.x >= 0.0 {
         egui::vec2(2.0, -galley.size().y * 0.5)
     } else {
         egui::vec2(-galley.size().x - 2.0, -galley.size().y * 0.5)
     };
-    painter.galley(st + off, galley, color);
+    painter.galley(anchor + off, galley, color);
 }
 
 /// Filled arrowhead at `tip`, pointing along `from`→`tip`, `size` px long.
