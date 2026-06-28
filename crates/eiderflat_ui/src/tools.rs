@@ -517,22 +517,8 @@ impl Tool {
                         ToolEvent::Pending
                     } else {
                         let start_angle = dy.atan2(dx);
-                        let mut verts = Vec::with_capacity(n);
-                        for i in 0..n {
-                            let angle =
-                                start_angle + (i as f64) * std::f64::consts::TAU / (n as f64);
-                            verts.push(Point2d::from_f64(
-                                cx + r * angle.cos(),
-                                cy + r * angle.sin(),
-                            ));
-                        }
-                        let mut segments = Vec::new();
-                        for i in 0..n {
-                            segments.push(Curve::Line(LineSeg::from_endpoints(
-                                verts[i],
-                                verts[(i + 1) % n],
-                            )));
-                        }
+                        let verts = polygon_vertices(cx, cy, r, start_angle, n);
+                        let segments = closed_chain(&verts);
                         *self = Tool::Polygon {
                             center: None,
                             sides: Some(n),
@@ -805,20 +791,14 @@ impl Tool {
             Tool::Spline { pts } => {
                 let mut cv = pts.clone();
                 cv.push(*cursor);
-                let mut out = Vec::new();
-                for i in 0..cv.len().saturating_sub(1) {
-                    out.push(Curve::Line(LineSeg::from_endpoints(cv[i], cv[i + 1])));
-                }
+                let mut out = line_chain(&cv);
                 if pts.len() >= 3 {
                     out.extend(cv_spline_segments(pts).into_iter().map(Curve::Rational));
                 }
                 out
             }
             Tool::Polyline { pts } => {
-                let mut curves = Vec::new();
-                for i in 0..pts.len().saturating_sub(1) {
-                    curves.push(Curve::Line(LineSeg::from_endpoints(pts[i], pts[i + 1])));
-                }
+                let mut curves = line_chain(pts);
                 if let Some(last) = pts.last() {
                     curves.push(Curve::Line(LineSeg::from_endpoints(*last, *cursor)));
                 }
@@ -836,23 +816,8 @@ impl Tool {
                 let dy = ry - cy;
                 let r = (dx * dx + dy * dy).sqrt();
                 let start_angle = dy.atan2(dx);
-                let n = *n;
-                let mut verts = Vec::with_capacity(n);
-                for i in 0..n {
-                    let angle = start_angle + (i as f64) * std::f64::consts::TAU / (n as f64);
-                    verts.push(Point2d::from_f64(
-                        cx + r * angle.cos(),
-                        cy + r * angle.sin(),
-                    ));
-                }
-                let mut curves = Vec::new();
-                for i in 0..n {
-                    curves.push(Curve::Line(LineSeg::from_endpoints(
-                        verts[i],
-                        verts[(i + 1) % n],
-                    )));
-                }
-                curves
+                let verts = polygon_vertices(cx, cy, r, start_angle, *n);
+                closed_chain(&verts)
             }
             _ => vec![],
         }
@@ -915,11 +880,7 @@ impl Tool {
         match self {
             Tool::Polyline { pts } => {
                 if pts.len() >= 2 {
-                    let mut segments = Vec::new();
-                    for i in 0..pts.len() - 1 {
-                        segments.push(Curve::Line(LineSeg::from_endpoints(pts[i], pts[i + 1])));
-                    }
-                    let poly = PolyCurve::new(segments);
+                    let poly = PolyCurve::new(line_chain(pts));
                     *self = Tool::Polyline { pts: Vec::new() };
                     ToolEvent::Create(vec![EntityKind::Curve(Curve::Poly(Box::new(poly)))])
                 } else {
@@ -940,10 +901,7 @@ impl Tool {
         match self {
             Tool::Polyline { pts } => {
                 if pts.len() >= 2 {
-                    let mut segments = Vec::new();
-                    for i in 0..pts.len() - 1 {
-                        segments.push(Curve::Line(LineSeg::from_endpoints(pts[i], pts[i + 1])));
-                    }
+                    let mut segments = line_chain(pts);
                     segments.push(Curve::Line(LineSeg::from_endpoints(
                         *pts.last().unwrap(),
                         pts[0],
@@ -1008,12 +966,36 @@ fn rectangle_curves(c0: &Point2d, c1: &Point2d) -> Vec<Curve> {
     let (y0, y1) = order(c0.y, c1.y);
     let p = |x: f64, y: f64| Point2d::new(x, y);
     let corners = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
-    (0..4)
-        .map(|i| Curve::Line(LineSeg::from_endpoints(corners[i], corners[(i + 1) % 4])))
-        .collect()
+    closed_chain(&corners)
 }
 fn closed_polycurve(curves: Vec<Curve>) -> EntityKind {
     EntityKind::Curve(Curve::Poly(Box::new(PolyCurve::new(curves))))
+}
+
+/// Line segments joining each consecutive pair of points (open chain).
+fn line_chain(pts: &[Point2d]) -> Vec<Curve> {
+    pts.windows(2)
+        .map(|w| Curve::Line(LineSeg::from_endpoints(w[0], w[1])))
+        .collect()
+}
+
+/// Line segments around a closed loop, including the segment back to the start.
+fn closed_chain(pts: &[Point2d]) -> Vec<Curve> {
+    let n = pts.len();
+    (0..n)
+        .map(|i| Curve::Line(LineSeg::from_endpoints(pts[i], pts[(i + 1) % n])))
+        .collect()
+}
+
+/// Vertices of a regular `n`-gon centred at `(cx, cy)` with circumradius `r`,
+/// starting from `start_angle`.
+fn polygon_vertices(cx: f64, cy: f64, r: f64, start_angle: f64, n: usize) -> Vec<Point2d> {
+    (0..n)
+        .map(|i| {
+            let a = start_angle + (i as f64) * std::f64::consts::TAU / (n as f64);
+            Point2d::from_f64(cx + r * a.cos(), cy + r * a.sin())
+        })
+        .collect()
 }
 
 fn arc_start_center_end(start: &Point2d, center: &Point2d, end: &Point2d) -> Option<CircularArc> {

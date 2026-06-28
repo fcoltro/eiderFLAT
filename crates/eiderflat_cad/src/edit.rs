@@ -1,7 +1,7 @@
 use eiderflat_document::{Document, EntityId, EntityKind};
 use eiderflat_geometry::{
-    CircularArc, Curve, CurveSegment, EllipticalArc, LineSeg, Point2d, PolyCurve, Transform2d,
-    intersect, offset_curve, point_to_curve_distance, reverse_curve, split_curve,
+    CircularArc, Curve, CurveSegment, EllipticalArc, LineSeg, MinTracker, Point2d, PolyCurve,
+    Transform2d, intersect, offset_curve, point_to_curve_distance, reverse_curve, split_curve,
 };
 
 pub fn erase(doc: &mut Document, ids: &[EntityId]) {
@@ -13,13 +13,11 @@ pub fn erase(doc: &mut Document, ids: &[EntityId]) {
 pub fn explode(doc: &mut Document, ids: &[EntityId]) -> Vec<EntityId> {
     let mut new_ids = Vec::new();
     for &id in ids {
-        let (segments, layer) = match doc.get(id) {
-            Some(e) => match e.as_curve() {
-                Some(Curve::Poly(pc)) => (pc.segments.clone(), e.layer),
-                _ => continue,
-            },
-            None => continue,
+        let Some(e) = doc.get(id) else { continue };
+        let Some(Curve::Poly(pc)) = e.as_curve() else {
+            continue;
         };
+        let (segments, layer) = (pc.segments.clone(), e.layer);
         for seg in segments {
             new_ids.push(doc.add_on_layer(EntityKind::Curve(seg), layer));
         }
@@ -142,19 +140,20 @@ fn trim_outcome(
         if cid == target {
             continue;
         }
-        if let Some(cc) = doc.get(cid).and_then(|e| e.as_curve()) {
-            if !target_bb.intersects(&cc.bounding_box()) {
-                continue;
-            }
-            for hit in intersect(curve, cc) {
-                let tn = (hit.t1 - t0) / span;
-                if tn > 1e-6 && tn < 1.0 - 1e-6 {
-                    params.push(tn);
-                }
+        let Some(cc) = doc.get(cid).and_then(|e| e.as_curve()) else {
+            continue;
+        };
+        if !target_bb.intersects(&cc.bounding_box()) {
+            continue;
+        }
+        for hit in intersect(curve, cc) {
+            let tn = (hit.t1 - t0) / span;
+            if tn > 1e-6 && tn < 1.0 - 1e-6 {
+                params.push(tn);
             }
         }
     }
-    params.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    params.sort_by(f64::total_cmp);
     params.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
     if params.len() <= 2 {
         let eps = 1e-6;
@@ -329,16 +328,17 @@ fn full_conic_cut_fracs(
         if cid == target {
             continue;
         }
-        if let Some(cc) = doc.get(cid).and_then(|e| e.as_curve()) {
-            if !bb.intersects(&cc.bounding_box()) {
-                continue;
-            }
-            for hit in intersect(curve, cc) {
-                fr.push(((hit.t1 - t0) / span).rem_euclid(1.0));
-            }
+        let Some(cc) = doc.get(cid).and_then(|e| e.as_curve()) else {
+            continue;
+        };
+        if !bb.intersects(&cc.bounding_box()) {
+            continue;
+        }
+        for hit in intersect(curve, cc) {
+            fr.push(((hit.t1 - t0) / span).rem_euclid(1.0));
         }
     }
-    fr.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    fr.sort_by(f64::total_cmp);
     fr.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
     fr
 }
@@ -495,14 +495,13 @@ fn extend_line_solution(
     }
     let (ux, uy) = (dx / len, dy / len);
 
-    let mut best: Option<(f64, Point2d)> = None;
+    let mut best = MinTracker::new();
     for &bid in boundaries {
         if bid == target {
             continue;
         }
-        let bc = match doc.get(bid).and_then(|e| e.as_curve()) {
-            Some(c) => c,
-            None => continue,
+        let Some(bc) = doc.get(bid).and_then(|e| e.as_curve()) else {
+            continue;
         };
         let big = ray_len_for(m, bc);
         let ray = Curve::Line(LineSeg::from_endpoints(
@@ -511,12 +510,13 @@ fn extend_line_solution(
         ));
         for hit in intersect(&ray, bc) {
             let dist = hit.t1 * big;
-            if dist > 1e-7 && best.as_ref().map(|(d, _)| dist < *d).unwrap_or(true) {
-                best = Some((dist, Point2d::from_f64(hit.point.0, hit.point.1)));
+            if dist > 1e-7 {
+                best.offer(dist, Point2d::from_f64(hit.point.0, hit.point.1));
             }
         }
     }
-    best.map(|(_, hit)| ExtendSolution::Line { which_p1, hit })
+    best.value()
+        .map(|hit| ExtendSolution::Line { which_p1, hit })
 }
 
 fn extend_arc_solution(
@@ -534,14 +534,13 @@ fn extend_arc_solution(
     let set_end = sq_dist(ep, (px, py)) <= sq_dist(sp, (px, py));
 
     let circle = Curve::Arc(CircularArc::new(a.center, r, 0.0, std::f64::consts::TAU));
-    let mut best: Option<f64> = None;
+    let mut best = MinTracker::new();
     for &bid in boundaries {
         if bid == target {
             continue;
         }
-        let bc = match doc.get(bid).and_then(|e| e.as_curve()) {
-            Some(c) => c,
-            None => continue,
+        let Some(bc) = doc.get(bid).and_then(|e| e.as_curve()) else {
+            continue;
         };
         for hit in intersect(&circle, bc) {
             let (hx, hy) = hit.point;
@@ -551,12 +550,12 @@ fn extend_arc_solution(
             } else {
                 norm_pos(a.start_angle - ang)
             };
-            if delta > 1e-6 && best.map(|b| delta < b).unwrap_or(true) {
-                best = Some(delta);
+            if delta > 1e-6 {
+                best.offer(delta, delta);
             }
         }
     }
-    let delta = best?;
+    let delta = best.value()?;
     let (angle, added) = if set_end {
         (
             a.end_angle + delta,
@@ -1623,7 +1622,7 @@ mod tests {
                 _ => panic!("survivor is not a line"),
             })
             .collect();
-        spans.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
         assert!((spans[0].0 - 0.0).abs() < 1e-6 && (spans[0].1 - 2.0).abs() < 1e-6);
         assert!(
             (spans[1].0 - 5.0).abs() < 1e-6 && (spans[1].1 - 10.0).abs() < 1e-6,

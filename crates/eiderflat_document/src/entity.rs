@@ -308,8 +308,7 @@ fn transform_pattern(p: &HatchPattern, t: &Transform2d) -> HatchPattern {
 }
 
 fn transform_dir(t: &Transform2d, dir: &(f64, f64)) -> (f64, f64) {
-    let (dx, dy) = dir;
-    (t.m00 * dx + t.m01 * dy, t.m10 * dx + t.m11 * dy)
+    t.apply_vector(dir.0, dir.1)
 }
 
 #[cfg(test)]

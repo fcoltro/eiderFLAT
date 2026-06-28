@@ -5,6 +5,7 @@ use eiderflat_geometry::{
     CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
     RationalBezier,
 };
+use std::fmt::Write as _;
 use std::io::Write;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -13,26 +14,28 @@ pub const VERSION: u32 = 1;
 
 pub fn to_string(doc: &Document) -> String {
     let mut s = String::new();
-    s.push_str(&format!("{} {}\n", MAGIC, VERSION));
-    s.push_str(&format!("UNITS {}\n", units_name(doc.settings.units)));
-    s.push_str(&format!("GRID {}\n", doc.settings.grid_spacing));
-    s.push_str(&format!("SNAP {}\n", doc.settings.snap_spacing));
+    let _ = writeln!(s, "{MAGIC} {VERSION}");
+    let _ = writeln!(s, "UNITS {}", units_name(doc.settings.units));
+    let _ = writeln!(s, "GRID {}", doc.settings.grid_spacing);
+    let _ = writeln!(s, "SNAP {}", doc.settings.snap_spacing);
     let ds = &doc.settings.dim_style;
-    s.push_str(&format!(
-        "DIMSTYLE {} {} {} {}\n",
+    let _ = writeln!(
+        s,
+        "DIMSTYLE {} {} {} {}",
         ds.text_height,
         ds.arrow_size,
         ds.font.as_deref().map(esc).unwrap_or_else(|| "-".into()),
         ds.precision
-    ));
+    );
 
     for lt in &doc.line_types {
         let pat: Vec<String> = lt.pattern.iter().map(|p| p.to_string()).collect();
-        s.push_str(&format!("LT {} {}\n", esc(&lt.name), pat.join(",")));
+        let _ = writeln!(s, "LT {} {}", esc(&lt.name), pat.join(","));
     }
     for l in &doc.layers.layers {
-        s.push_str(&format!(
-            "LAYER {} {},{},{} {} {} {} {}\n",
+        let _ = writeln!(
+            s,
+            "LAYER {} {},{},{} {} {} {} {}",
             esc(&l.name),
             l.color.0,
             l.color.1,
@@ -41,7 +44,7 @@ pub fn to_string(doc: &Document) -> String {
             l.frozen as u8,
             l.locked as u8,
             esc(&linetype_name(&l.line_type))
-        ));
+        );
     }
     for e in doc.iter() {
         write_entity(&mut s, e);
@@ -64,66 +67,59 @@ fn write_entity(s: &mut String, e: &Entity) {
     let layer = e.layer;
     let color = color_str(&e.color);
     match &e.kind {
-        EntityKind::Curve(Curve::Line(l)) => s.push_str(&format!(
-            "E LINE {} {} {} {}\n",
-            layer,
-            color,
-            pt(&l.p0),
-            pt(&l.p1)
-        )),
+        EntityKind::Curve(Curve::Line(l)) => {
+            let _ = writeln!(s, "E LINE {layer} {color} {} {}", pt(&l.p0), pt(&l.p1));
+        }
         EntityKind::Curve(Curve::Arc(a)) => {
-            let (cx, cy) = (rat(a.center.x), rat(a.center.y));
-            s.push_str(&format!(
-                "E ARC {} {} {};{} {} {} {}\n",
-                layer,
-                color,
-                cx,
-                cy,
+            let _ = writeln!(
+                s,
+                "E ARC {layer} {color} {};{} {} {} {}",
+                rat(a.center.x),
+                rat(a.center.y),
                 rat(a.radius),
                 a.start_angle,
                 a.end_angle
-            ));
+            );
         }
-        EntityKind::Curve(Curve::Ellipse(el)) => s.push_str(&format!(
-            "E ELLIPSE {} {} {};{} {} {} {} {} {}\n",
-            layer,
-            color,
-            rat(el.center.x),
-            rat(el.center.y),
-            rat(el.semi_major),
-            rat(el.semi_minor),
-            el.rotation,
-            el.start_angle,
-            el.end_angle
-        )),
-        EntityKind::Curve(Curve::Bezier(b)) => s.push_str(&format!(
-            "E BEZIER {} {} {} {} {} {}\n",
-            layer,
-            color,
-            pt(&b.p0),
-            pt(&b.p1),
-            pt(&b.p2),
-            pt(&b.p3)
-        )),
-        EntityKind::Curve(Curve::Rational(rb)) => s.push_str(&format!(
-            "E RATIONAL {} {} {}\n",
-            layer,
-            color,
-            control_fields(&rb.points, &rb.weights)
-        )),
-        EntityKind::Curve(Curve::Nurbs(nc)) => s.push_str(&format!(
-            "E NURBS {} {} {}\n",
-            layer,
-            color,
-            control_fields(&nc.control, &nc.weights)
-        )),
+        EntityKind::Curve(Curve::Ellipse(el)) => {
+            let _ = writeln!(
+                s,
+                "E ELLIPSE {layer} {color} {};{} {} {} {} {} {}",
+                rat(el.center.x),
+                rat(el.center.y),
+                rat(el.semi_major),
+                rat(el.semi_minor),
+                el.rotation,
+                el.start_angle,
+                el.end_angle
+            );
+        }
+        EntityKind::Curve(Curve::Bezier(b)) => {
+            let _ = writeln!(
+                s,
+                "E BEZIER {layer} {color} {} {} {} {}",
+                pt(&b.p0),
+                pt(&b.p1),
+                pt(&b.p2),
+                pt(&b.p3)
+            );
+        }
+        EntityKind::Curve(Curve::Rational(rb)) => {
+            let _ = writeln!(
+                s,
+                "E RATIONAL {layer} {color} {}",
+                control_fields(&rb.points, &rb.weights)
+            );
+        }
+        EntityKind::Curve(Curve::Nurbs(nc)) => {
+            let _ = writeln!(
+                s,
+                "E NURBS {layer} {color} {}",
+                control_fields(&nc.control, &nc.weights)
+            );
+        }
         EntityKind::Curve(Curve::Poly(pc)) => {
-            s.push_str(&format!(
-                "E POLY {} {} {}\n",
-                layer,
-                color,
-                pc.segments.len()
-            ));
+            let _ = writeln!(s, "E POLY {layer} {color} {}", pc.segments.len());
             for seg in &pc.segments {
                 write_segment(s, seg);
             }
@@ -134,60 +130,63 @@ fn write_entity(s: &mut String, e: &Entity) {
             fill,
             pattern,
         } => {
-            s.push_str(&format!(
-                "E HATCH {} {} {},{},{} {} {} {}\n",
-                layer,
-                color,
+            let _ = writeln!(
+                s,
+                "E HATCH {layer} {color} {},{},{} {} {} {}",
                 fill.0,
                 fill.1,
                 fill.2,
                 boundary.len(),
                 holes.len(),
                 pattern_str(pattern)
-            ));
+            );
             for seg in boundary {
                 write_segment(s, seg);
             }
             for hole in holes {
-                s.push_str(&format!("HOLE {}\n", hole.len()));
+                let _ = writeln!(s, "HOLE {}", hole.len());
                 for seg in hole {
                     write_segment(s, seg);
                 }
             }
         }
-        EntityKind::Point(p) => s.push_str(&format!("E POINT {} {} {}\n", layer, color, pt(p))),
+        EntityKind::Point(p) => {
+            let _ = writeln!(s, "E POINT {layer} {color} {}", pt(p));
+        }
         EntityKind::Text {
             anchor,
             content,
             height,
             rotation,
             font,
-        } => s.push_str(&format!(
-            "E TEXT {} {} {} {} {} {} {}\n",
-            layer,
-            color,
-            pt(anchor),
-            height,
-            rotation,
-            esc(content),
-            font.as_deref().map(esc).unwrap_or_else(|| "-".into())
-        )),
+        } => {
+            let _ = writeln!(
+                s,
+                "E TEXT {layer} {color} {} {} {} {} {}",
+                pt(anchor),
+                height,
+                rotation,
+                esc(content),
+                font.as_deref().map(esc).unwrap_or_else(|| "-".into())
+            );
+        }
         EntityKind::Dimension {
             p1,
             p2,
             line,
             height,
             override_text,
-        } => s.push_str(&format!(
-            "E DIM {} {} {} {} {} {} {}\n",
-            layer,
-            color,
-            pt(p1),
-            pt(p2),
-            pt(line),
-            height,
-            dim_override(override_text)
-        )),
+        } => {
+            let _ = writeln!(
+                s,
+                "E DIM {layer} {color} {} {} {} {} {}",
+                pt(p1),
+                pt(p2),
+                pt(line),
+                height,
+                dim_override(override_text)
+            );
+        }
         EntityKind::OrthoDim {
             p1,
             p2,
@@ -195,17 +194,18 @@ fn write_entity(s: &mut String, e: &Entity) {
             vertical,
             height,
             override_text,
-        } => s.push_str(&format!(
-            "E DIMORTHO {} {} {} {} {} {} {} {}\n",
-            layer,
-            color,
-            pt(p1),
-            pt(p2),
-            pt(line),
-            *vertical as u8,
-            height,
-            dim_override(override_text)
-        )),
+        } => {
+            let _ = writeln!(
+                s,
+                "E DIMORTHO {layer} {color} {} {} {} {} {} {}",
+                pt(p1),
+                pt(p2),
+                pt(line),
+                *vertical as u8,
+                height,
+                dim_override(override_text)
+            );
+        }
         EntityKind::AngularDim {
             center,
             p1,
@@ -213,69 +213,85 @@ fn write_entity(s: &mut String, e: &Entity) {
             line,
             height,
             override_text,
-        } => s.push_str(&format!(
-            "E DIMANG {} {} {} {} {} {} {} {}\n",
-            layer,
-            color,
-            pt(center),
-            pt(p1),
-            pt(p2),
-            pt(line),
-            height,
-            dim_override(override_text)
-        )),
+        } => {
+            let _ = writeln!(
+                s,
+                "E DIMANG {layer} {color} {} {} {} {} {} {}",
+                pt(center),
+                pt(p1),
+                pt(p2),
+                pt(line),
+                height,
+                dim_override(override_text)
+            );
+        }
         EntityKind::RadialDim {
             center,
             edge,
             diameter,
             height,
             override_text,
-        } => s.push_str(&format!(
-            "E DIMRAD {} {} {} {} {} {} {}\n",
-            layer,
-            color,
-            pt(center),
-            pt(edge),
-            *diameter as u8,
-            height,
-            dim_override(override_text)
-        )),
+        } => {
+            let _ = writeln!(
+                s,
+                "E DIMRAD {layer} {color} {} {} {} {} {}",
+                pt(center),
+                pt(edge),
+                *diameter as u8,
+                height,
+                dim_override(override_text)
+            );
+        }
         _ => {}
     }
 }
 
 fn write_segment(s: &mut String, seg: &Curve) {
     match seg {
-        Curve::Line(l) => s.push_str(&format!("SEG LINE {} {}\n", pt(&l.p0), pt(&l.p1))),
-        Curve::Arc(a) => s.push_str(&format!(
-            "SEG ARC {};{} {} {} {}\n",
-            rat(a.center.x),
-            rat(a.center.y),
-            rat(a.radius),
-            a.start_angle,
-            a.end_angle
-        )),
-        Curve::Bezier(b) => s.push_str(&format!(
-            "SEG BEZIER {} {} {} {}\n",
-            pt(&b.p0),
-            pt(&b.p1),
-            pt(&b.p2),
-            pt(&b.p3)
-        )),
-        Curve::Rational(rb) => s.push_str(&format!(
-            "SEG RATIONAL {}\n",
-            control_fields(&rb.points, &rb.weights)
-        )),
-        Curve::Ellipse(e) => s.push_str(&format!(
-            "SEG ELLIPSE {};{} {} {} {} {} {}\n",
-            rat(e.center.x),
-            rat(e.center.y),
-            rat(e.semi_major),
-            rat(e.semi_minor),
-            e.rotation,
-            e.start_angle,
-            e.end_angle
-        )),
+        Curve::Line(l) => {
+            let _ = writeln!(s, "SEG LINE {} {}", pt(&l.p0), pt(&l.p1));
+        }
+        Curve::Arc(a) => {
+            let _ = writeln!(
+                s,
+                "SEG ARC {};{} {} {} {}",
+                rat(a.center.x),
+                rat(a.center.y),
+                rat(a.radius),
+                a.start_angle,
+                a.end_angle
+            );
+        }
+        Curve::Bezier(b) => {
+            let _ = writeln!(
+                s,
+                "SEG BEZIER {} {} {} {}",
+                pt(&b.p0),
+                pt(&b.p1),
+                pt(&b.p2),
+                pt(&b.p3)
+            );
+        }
+        Curve::Rational(rb) => {
+            let _ = writeln!(
+                s,
+                "SEG RATIONAL {}",
+                control_fields(&rb.points, &rb.weights)
+            );
+        }
+        Curve::Ellipse(e) => {
+            let _ = writeln!(
+                s,
+                "SEG ELLIPSE {};{} {} {} {} {} {}",
+                rat(e.center.x),
+                rat(e.center.y),
+                rat(e.semi_major),
+                rat(e.semi_minor),
+                e.rotation,
+                e.start_angle,
+                e.end_angle
+            );
+        }
         _ => s.push_str("SEG LINE 0;0 0;0\n"),
     }
 }
@@ -283,7 +299,7 @@ fn write_segment(s: &mut String, seg: &Curve) {
 fn control_fields(points: &[Point2d], weights: &[f64]) -> String {
     let mut out = points.len().to_string();
     for (p, w) in points.iter().zip(weights) {
-        out.push_str(&format!(" {} {}", pt(p), rat(*w)));
+        let _ = write!(out, " {} {}", pt(p), rat(*w));
     }
     out
 }
@@ -315,23 +331,14 @@ pub fn from_string(text: &str) -> Result<Document, String> {
         let mut tok = line.split_whitespace();
         match tok.next() {
             Some("UNITS") => doc.settings.units = parse_units(tok.next().unwrap_or("")),
-            Some("GRID") => {
-                doc.settings.grid_spacing = tok.next().and_then(|v| v.parse().ok()).unwrap_or(10.0)
-            }
-            Some("SNAP") => {
-                doc.settings.snap_spacing = tok.next().and_then(|v| v.parse().ok()).unwrap_or(1.0)
-            }
+            Some("GRID") => doc.settings.grid_spacing = next_parse(&mut tok, 10.0),
+            Some("SNAP") => doc.settings.snap_spacing = next_parse(&mut tok, 1.0),
             Some("DIMSTYLE") => {
                 let ds = &mut doc.settings.dim_style;
-                ds.text_height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
-                ds.arrow_size = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
-                ds.font = match tok.next() {
-                    None | Some("-") => None,
-                    Some(t) => Some(unesc(t)),
-                };
-                if let Some(p) = tok.next().and_then(|v| v.parse().ok()) {
-                    ds.precision = p;
-                }
+                ds.text_height = next_parse(&mut tok, 2.5);
+                ds.arrow_size = next_parse(&mut tok, 2.5);
+                ds.font = parse_opt_text(&mut tok);
+                ds.precision = next_parse(&mut tok, ds.precision);
             }
             Some("LT") => {
                 if let Some(lt) = parse_lt(&mut tok) {
@@ -366,11 +373,8 @@ fn parse_entity<'a>(
     lines: &mut std::iter::Peekable<std::str::Lines>,
     doc: &mut Document,
 ) {
-    let etype = match tok.next() {
-        Some(t) => t,
-        None => return,
-    };
-    let layer: usize = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let Some(etype) = tok.next() else { return };
+    let layer: usize = next_parse(tok, 0);
     let color = parse_color(tok.next().unwrap_or("bylayer"));
 
     let kind = match etype {
@@ -384,8 +388,8 @@ fn parse_entity<'a>(
         "ARC" => {
             let c = parse_pt(tok.next());
             let r = parse_num(tok.next().unwrap_or("1"));
-            let start = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let end = tok.next().and_then(|v| v.parse().ok()).unwrap_or(TAU);
+            let start = next_parse(tok, 0.0);
+            let end = next_parse(tok, TAU);
             Some(EntityKind::Curve(Curve::Arc(CircularArc::new(
                 c, r, start, end,
             ))))
@@ -394,9 +398,9 @@ fn parse_entity<'a>(
             let c = parse_pt(tok.next());
             let major = parse_num(tok.next().unwrap_or("1"));
             let minor = parse_num(tok.next().unwrap_or("1"));
-            let rot = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let start = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let end = tok.next().and_then(|v| v.parse().ok()).unwrap_or(TAU);
+            let rot = next_parse(tok, 0.0);
+            let start = next_parse(tok, 0.0);
+            let end = next_parse(tok, TAU);
             Some(EntityKind::Curve(Curve::Ellipse(EllipticalArc::new(
                 c, major, minor, rot, start, end,
             ))))
@@ -417,13 +421,10 @@ fn parse_entity<'a>(
         "POINT" => Some(EntityKind::Point(parse_pt(tok.next()))),
         "TEXT" => {
             let anchor = parse_pt(tok.next());
-            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);
-            let rotation = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let height = next_parse(tok, 1.0);
+            let rotation = next_parse(tok, 0.0);
             let content = unesc(tok.next().unwrap_or(""));
-            let font = match tok.next() {
-                None | Some("-") => None,
-                Some(t) => Some(unesc(t)),
-            };
+            let font = parse_opt_text(tok);
             Some(EntityKind::Text {
                 anchor,
                 content,
@@ -436,8 +437,8 @@ fn parse_entity<'a>(
             let p1 = parse_pt(tok.next());
             let p2 = parse_pt(tok.next());
             let line = parse_pt(tok.next());
-            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
-            let override_text = parse_dim_override(tok);
+            let height = next_parse(tok, 2.5);
+            let override_text = parse_opt_text(tok);
             Some(EntityKind::Dimension {
                 p1,
                 p2,
@@ -450,9 +451,9 @@ fn parse_entity<'a>(
             let p1 = parse_pt(tok.next());
             let p2 = parse_pt(tok.next());
             let line = parse_pt(tok.next());
-            let vertical = tok.next().map(|v| v == "1").unwrap_or(false);
-            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
-            let override_text = parse_dim_override(tok);
+            let vertical = next_flag(tok);
+            let height = next_parse(tok, 2.5);
+            let override_text = parse_opt_text(tok);
             Some(EntityKind::OrthoDim {
                 p1,
                 p2,
@@ -467,8 +468,8 @@ fn parse_entity<'a>(
             let p1 = parse_pt(tok.next());
             let p2 = parse_pt(tok.next());
             let line = parse_pt(tok.next());
-            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
-            let override_text = parse_dim_override(tok);
+            let height = next_parse(tok, 2.5);
+            let override_text = parse_opt_text(tok);
             Some(EntityKind::AngularDim {
                 center,
                 p1,
@@ -481,9 +482,9 @@ fn parse_entity<'a>(
         "DIMRAD" => {
             let center = parse_pt(tok.next());
             let edge = parse_pt(tok.next());
-            let diameter = tok.next().map(|v| v == "1").unwrap_or(false);
-            let height = tok.next().and_then(|v| v.parse().ok()).unwrap_or(2.5);
-            let override_text = parse_dim_override(tok);
+            let diameter = next_flag(tok);
+            let height = next_parse(tok, 2.5);
+            let override_text = parse_opt_text(tok);
             Some(EntityKind::RadialDim {
                 center,
                 edge,
@@ -493,7 +494,7 @@ fn parse_entity<'a>(
             })
         }
         "POLY" => {
-            let count: usize = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let count: usize = next_parse(tok, 0);
             let mut segs = Vec::new();
             for _ in 0..count {
                 let Some(segline) = lines.next() else { break };
@@ -507,8 +508,8 @@ fn parse_entity<'a>(
         }
         "HATCH" => {
             let fill = parse_rgb_triple(tok.next().unwrap_or(""));
-            let nb: usize = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-            let nh: usize = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let nb: usize = next_parse(tok, 0);
+            let nh: usize = next_parse(tok, 0);
             let read_segs = |lines: &mut std::iter::Peekable<std::str::Lines>, n: usize| {
                 let mut v = Vec::new();
                 for _ in 0..n {
@@ -564,8 +565,8 @@ fn parse_segment(line: &str) -> Option<Curve> {
         "ARC" => {
             let c = parse_pt(tok.next());
             let r = parse_num(tok.next().unwrap_or("1"));
-            let start = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let end = tok.next().and_then(|v| v.parse().ok()).unwrap_or(TAU);
+            let start = next_parse(&mut tok, 0.0);
+            let end = next_parse(&mut tok, TAU);
             Some(Curve::Arc(CircularArc::new(c, r, start, end)))
         }
         "BEZIER" => Some(Curve::Bezier(CubicBezier::new(
@@ -581,9 +582,9 @@ fn parse_segment(line: &str) -> Option<Curve> {
             let c = parse_pt(tok.next());
             let major = parse_num(tok.next().unwrap_or("1"));
             let minor = parse_num(tok.next().unwrap_or("1"));
-            let rot = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let start = tok.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let end = tok.next().and_then(|v| v.parse().ok()).unwrap_or(TAU);
+            let rot = next_parse(&mut tok, 0.0);
+            let start = next_parse(&mut tok, 0.0);
+            let end = next_parse(&mut tok, TAU);
             Some(Curve::Ellipse(EllipticalArc::new(
                 c, major, minor, rot, start, end,
             )))
@@ -612,6 +613,16 @@ fn rat(v: f64) -> String {
 }
 fn pt(p: &Point2d) -> String {
     format!("{};{}", rat(p.x), rat(p.y))
+}
+
+/// Pops the next token and parses it, falling back to `default` when absent or invalid.
+fn next_parse<'a, T: std::str::FromStr>(tok: &mut impl Iterator<Item = &'a str>, default: T) -> T {
+    tok.next().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+/// Pops the next token and reads it as a `1`/`0` boolean flag (defaults to false).
+fn next_flag<'a>(tok: &mut impl Iterator<Item = &'a str>) -> bool {
+    tok.next() == Some("1")
 }
 
 fn parse_num(s: &str) -> f64 {
@@ -738,32 +749,22 @@ fn pattern_str(p: &HatchPattern) -> String {
 }
 
 fn parse_pattern(tok: Option<&str>) -> HatchPattern {
-    let s = match tok {
-        Some(s) => s,
-        None => return HatchPattern::Solid,
+    let Some(s) = tok else {
+        return HatchPattern::Solid;
     };
     let mut it = s.split(':');
     match it.next() {
-        Some("lines") => {
-            let a = it.next().and_then(|v| v.parse().ok()).unwrap_or(45.0);
-            let sp = it.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);
-            HatchPattern::Lines {
-                angle_deg: a,
-                spacing: sp,
-            }
-        }
-        Some("cross") => {
-            let a = it.next().and_then(|v| v.parse().ok()).unwrap_or(45.0);
-            let sp = it.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);
-            HatchPattern::Cross {
-                angle_deg: a,
-                spacing: sp,
-            }
-        }
-        Some("dots") => {
-            let sp = it.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);
-            HatchPattern::Dots { spacing: sp }
-        }
+        Some("lines") => HatchPattern::Lines {
+            angle_deg: next_parse(&mut it, 45.0),
+            spacing: next_parse(&mut it, 1.0),
+        },
+        Some("cross") => HatchPattern::Cross {
+            angle_deg: next_parse(&mut it, 45.0),
+            spacing: next_parse(&mut it, 1.0),
+        },
+        Some("dots") => HatchPattern::Dots {
+            spacing: next_parse(&mut it, 1.0),
+        },
         _ => HatchPattern::Solid,
     }
 }
@@ -782,7 +783,8 @@ fn dim_override(o: &Option<String>) -> String {
     }
 }
 
-fn parse_dim_override<'a>(tok: &mut impl Iterator<Item = &'a str>) -> Option<String> {
+/// Reads an optional escaped string written as `-` when absent (dim overrides, fonts).
+fn parse_opt_text<'a>(tok: &mut impl Iterator<Item = &'a str>) -> Option<String> {
     match tok.next() {
         None | Some("-") => None,
         Some(t) => Some(unesc(t)),

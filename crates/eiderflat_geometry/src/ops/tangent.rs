@@ -1,6 +1,7 @@
 use crate::curve::Curve;
 use crate::point::Point2d;
 use crate::primitives::{CircularArc, LineSeg};
+use crate::util::MinTracker;
 
 const EPS: f64 = 1e-9;
 
@@ -19,18 +20,15 @@ pub fn tangent_circle_ttr(
     }
     let l1 = center_loci(c1, radius)?;
     let l2 = center_loci(c2, radius)?;
-    let mut best: Option<(f64, Point2d)> = None;
+    let mut best = MinTracker::new();
     for a in &l1 {
         for b in &l2 {
             for p in intersect_loci(a, b) {
-                let d = p.dist_sq(&near);
-                if best.as_ref().map(|(bd, _)| d < *bd).unwrap_or(true) {
-                    best = Some((d, p));
-                }
+                best.offer(p.dist_sq(&near), p);
             }
         }
     }
-    best.map(|(_, c)| (c, radius))
+    best.value().map(|c| (c, radius))
 }
 
 pub fn tangent_circle_ttt(
@@ -40,22 +38,19 @@ pub fn tangent_circle_ttt(
     near: Point2d,
 ) -> Option<(Point2d, f64)> {
     let objs = [as_object(c1)?, as_object(c2)?, as_object(c3)?];
-    let mut best: Option<(f64, Point2d, f64)> = None;
+    let mut best = MinTracker::new();
     for &s0 in &[1.0, -1.0] {
         for &s1 in &[1.0, -1.0] {
             for &s2 in &[1.0, -1.0] {
                 for (c, r) in solve_apollonius(&objs, [s0, s1, s2]) {
                     if r > EPS {
-                        let d = c.dist_sq(&near);
-                        if best.as_ref().map(|(bd, _, _)| d < *bd).unwrap_or(true) {
-                            best = Some((d, c, r));
-                        }
+                        best.offer(c.dist_sq(&near), (c, r));
                     }
                 }
             }
         }
     }
-    best.map(|(_, c, r)| (c, r))
+    best.value()
 }
 
 #[derive(Clone, Copy)]

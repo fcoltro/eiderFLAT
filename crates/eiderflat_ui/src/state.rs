@@ -3,7 +3,7 @@ use eiderflat_cad::{
     grips_for, infer_axis, pick_at,
 };
 use eiderflat_document::{Document, Entity, EntityId, EntityKind, Layer, LineTypeRef, LineWeight};
-use eiderflat_geometry::{Curve, Point2d};
+use eiderflat_geometry::{Curve, MinTracker, Point2d};
 
 use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
 use crate::history::History;
@@ -597,15 +597,15 @@ impl AppState {
         {
             return None;
         }
-        let mut best: Option<(f64, (f64, f64))> = None;
+        let mut best = MinTracker::new();
         for p in self.tool.in_progress_points() {
             let (px, py) = p.to_f64();
             let d = (px - cursor.0).hypot(py - cursor.1);
-            if d <= tol && best.map(|(bd, _)| d < bd).unwrap_or(true) {
-                best = Some((d, (px, py)));
+            if d <= tol {
+                best.offer(d, (px, py));
             }
         }
-        best.map(|(_, pos)| SnapPoint {
+        best.value().map(|pos| SnapPoint {
             kind: eiderflat_cad::SnapKind::Endpoint,
             pos,
             entity: self.origin_id,

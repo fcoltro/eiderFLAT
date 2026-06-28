@@ -208,7 +208,7 @@ impl Quadtree {
         candidates.into_iter().min_by(|&a, &b| {
             let da = point_to_curve_distance(&self.curves[a], px, py);
             let db = point_to_curve_distance(&self.curves[b], px, py);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            da.total_cmp(&db)
         })
     }
 }

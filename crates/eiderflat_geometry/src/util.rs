@@ -51,6 +51,39 @@ pub fn point_segment_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     point_segment_dist_sq(p, a, b).sqrt()
 }
 
+/// Accumulates the value with the smallest `f64` score seen so far.
+///
+/// Replaces the hand-rolled `best.as_ref().map(|(b, _)| x < *b).unwrap_or(true)`
+/// idiom: callers `offer` candidates inside a loop and read the winner with
+/// [`MinTracker::value`]. Ties keep the first candidate offered.
+pub struct MinTracker<T> {
+    best: Option<(f64, T)>,
+}
+
+impl<T> Default for MinTracker<T> {
+    fn default() -> Self {
+        Self { best: None }
+    }
+}
+
+impl<T> MinTracker<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Keeps `value` when `score` is strictly smaller than the current best.
+    pub fn offer(&mut self, score: f64, value: T) {
+        if self.best.as_ref().is_none_or(|(b, _)| score < *b) {
+            self.best = Some((score, value));
+        }
+    }
+
+    /// The value with the smallest score, or `None` if nothing was offered.
+    pub fn value(self) -> Option<T> {
+        self.best.map(|(_, v)| v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

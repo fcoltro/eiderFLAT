@@ -132,6 +132,12 @@ impl Transform2d {
         }
     }
 
+    /// Applies only the linear (rotation/scale/shear) part to a direction vector,
+    /// ignoring translation. Use this for directions/normals rather than positions.
+    pub fn apply_vector(&self, dx: f64, dy: f64) -> (f64, f64) {
+        (self.m00 * dx + self.m01 * dy, self.m10 * dx + self.m11 * dy)
+    }
+
     pub fn determinant(&self) -> f64 {
         self.m00 * self.m11 - self.m01 * self.m10
     }

@@ -445,7 +445,7 @@ mod tests {
             hits.len()
         );
         let mut xs: Vec<f64> = hits.iter().map(|h| h.point.0).collect();
-        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        xs.sort_by(f64::total_cmp);
         assert!((xs[0] + 5.0).abs() < 1e-4);
         assert!((xs[1] - 5.0).abs() < 1e-4);
     }
@@ -475,7 +475,7 @@ mod tests {
             hits.len()
         );
         let mut pts: Vec<(f64, f64)> = hits.iter().map(|h| h.point).collect();
-        pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        pts.sort_by(|a, b| a.0.total_cmp(&b.0));
         assert!((pts[0].0 - -2.0).abs() < 1e-4);
         assert!((pts[0].1 - 4.0).abs() < 1e-4);
         assert!((pts[1].0 - 8.0).abs() < 1e-4);

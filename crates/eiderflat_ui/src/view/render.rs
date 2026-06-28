@@ -531,11 +531,7 @@ pub(super) fn draw_trim_extend_preview(
 }
 
 pub(super) fn layer_visible(app: &AppState, e: &eiderflat_document::Entity) -> bool {
-    app.document
-        .layers
-        .get(e.layer)
-        .map(|l| l.on)
-        .unwrap_or(true)
+    app.document.layers.get(e.layer).is_none_or(|l| l.on)
 }
 
 pub(super) fn resolve_color(app: &AppState, e: &eiderflat_document::Entity) -> (u8, u8, u8) {

@@ -1,6 +1,6 @@
 use eiderflat_boolean::{Region, intersection, union};
 use eiderflat_document::{Document, Entity, EntityId, EntityKind, HatchPattern};
-use eiderflat_geometry::{Curve, CurveSegment, LineSeg, Point2d, tessellate_curve};
+use eiderflat_geometry::{Curve, CurveSegment, LineSeg, MinTracker, Point2d, tessellate_curve};
 use std::collections::HashMap;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -110,7 +110,7 @@ fn clip_to_region(
             ts.push(t);
         }
     }
-    ts.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    ts.sort_by(f64::total_cmp);
     let lerp = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
     let mut out = Vec::new();
     for w in ts.windows(2) {
@@ -347,21 +347,20 @@ fn merge_one_hole(outer: Vec<P>, hole: &[P]) -> Vec<P> {
         .unwrap();
     let m = hole[mi];
     let n = outer.len();
-    let mut best: Option<(f64, usize)> = None;
+    let mut best = MinTracker::new();
     for i in 0..n {
         let a = outer[i];
         let b = outer[(i + 1) % n];
         if (a.1 <= m.1 && b.1 > m.1) || (b.1 <= m.1 && a.1 > m.1) {
             let t = (m.1 - a.1) / (b.1 - a.1);
             let x = a.0 + t * (b.0 - a.0);
-            if x >= m.0 - 1e-9 && best.as_ref().map(|(bx, _)| x < *bx).unwrap_or(true) {
-                best = Some((x, i));
+            if x >= m.0 - 1e-9 {
+                best.offer(x, i);
             }
         }
     }
-    let ei = match best {
-        Some((_, i)) => i,
-        None => return outer,
+    let Some(ei) = best.value() else {
+        return outer;
     };
     let (a, b) = (outer[ei], outer[(ei + 1) % n]);
     let pidx = if a.0 >= b.0 { ei } else { (ei + 1) % n };
@@ -618,7 +617,7 @@ fn trace_pick_region_arrangement(
         out.entry(b).or_default().push((ang_ba, a));
     }
     for v in out.values_mut() {
-        v.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(|x, y| x.0.total_cmp(&y.0));
     }
 
     let mut visited: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
@@ -726,7 +725,7 @@ fn split_at_intersections(segs: Vec<(P, P)>) -> Vec<(P, P)> {
                 ts.push(t);
             }
         }
-        ts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        ts.sort_by(f64::total_cmp);
         ts.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
         for w in ts.windows(2) {
             let p0 = (a.0 + w[0] * (b.0 - a.0), a.1 + w[0] * (b.1 - a.1));
@@ -842,11 +841,11 @@ fn recurve_loop(loop_: &[Curve], parts: &[Curve]) -> Vec<Curve> {
     let tol = (loop_diag(&verts) * 5e-3).max(5e-3);
 
     let assign = |p: P| -> Option<(usize, f64)> {
-        let mut best: Option<(usize, f64, f64)> = None;
+        let mut best = MinTracker::new();
         for (i, c) in parts.iter().enumerate() {
             let pr = project_point_onto_curve(c, p.0, p.1);
             let d = (pr.point.0 - p.0).hypot(pr.point.1 - p.1);
-            if d <= tol && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+            if d <= tol {
                 let (t0, t1) = c.domain();
                 let span = t1 - t0;
                 let nt = if span.abs() < 1e-12 {
@@ -854,10 +853,10 @@ fn recurve_loop(loop_: &[Curve], parts: &[Curve]) -> Vec<Curve> {
                 } else {
                     ((pr.t - t0) / span).clamp(0.0, 1.0)
                 };
-                best = Some((i, nt, d));
+                best.offer(d, (i, nt));
             }
         }
-        best.map(|(i, t, _)| (i, t))
+        best.value()
     };
     let va: Vec<Option<(usize, f64)>> = verts.iter().map(|&p| assign(p)).collect();
 
@@ -978,8 +977,7 @@ fn loop_polygon(boundary: &[Curve], tol: f64) -> Vec<P> {
         for p in flatten(seg, tol) {
             if pts
                 .last()
-                .map(|l| (l.0 - p.0).hypot(l.1 - p.1) > 1e-9)
-                .unwrap_or(true)
+                .is_none_or(|l| (l.0 - p.0).hypot(l.1 - p.1) > 1e-9)
             {
                 pts.push(p);
             }

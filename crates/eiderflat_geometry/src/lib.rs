@@ -19,5 +19,6 @@ pub use point::{BoundingBox, Point2d};
 pub use primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg, PolyCurve};
 pub use transform::Transform2d;
 pub use util::{
-    point_segment_dist, point_segment_dist_sq, wrap_deg360, wrap_from, wrap_pi, wrap_tau,
+    MinTracker, point_segment_dist, point_segment_dist_sq, wrap_deg360, wrap_from, wrap_pi,
+    wrap_tau,
 };

@@ -37,7 +37,7 @@ fn flatten_loop(curves: &[Curve]) -> Vec<Point2d> {
     let mut pts: Vec<Point2d> = Vec::new();
     for c in curves {
         for q in tessellate_curve(c, tol) {
-            if pts.last().map(|l| dist2(l, &q) > 1e-18).unwrap_or(true) {
+            if pts.last().is_none_or(|l| dist2(l, &q) > 1e-18) {
                 pts.push(q);
             }
         }
