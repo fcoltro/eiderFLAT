@@ -149,7 +149,13 @@ fn icon_texture(ctx: &egui::Context, icon: Icon) -> Option<egui::TextureHandle> 
 /// Paint an icon into `rect`. The glyphs ship pre-coloured (white + blue
 /// accent); `tint` multiplies that artwork — pass `Color32::WHITE` to render it
 /// faithfully, or a dimmer/coloured value to fade or shade it.
-pub fn paint_icon(painter: &egui::Painter, ctx: &egui::Context, icon: Icon, rect: Rect, tint: Color32) {
+pub fn paint_icon(
+    painter: &egui::Painter,
+    ctx: &egui::Context,
+    icon: Icon,
+    rect: Rect,
+    tint: Color32,
+) {
     if let Some(tex) = icon_texture(ctx, icon) {
         painter.image(
             tex.id(),
