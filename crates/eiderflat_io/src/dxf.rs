@@ -461,7 +461,16 @@ fn strip_mtext(s: &str) -> String {
 fn bulge_arc(x1: f64, y1: f64, x2: f64, y2: f64, bulge: f64) -> Curve {
     let theta = 4.0 * bulge.atan();
     let chord = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
-    let radius = (chord / 2.0) / (theta / 2.0).sin().abs();
+    // Coincident vertices (or a vanishing bulge) have no well-defined arc;
+    // fall back to a straight segment instead of dividing by zero.
+    let half_theta = (theta / 2.0).sin().abs();
+    if chord < 1e-12 || half_theta < 1e-12 {
+        return Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(x1, y1),
+            Point2d::from_f64(x2, y2),
+        ));
+    }
+    let radius = (chord / 2.0) / half_theta;
     let mx = (x1 + x2) / 2.0;
     let my = (y1 + y2) / 2.0;
     let d = (radius.powi(2) - (chord / 2.0).powi(2)).max(0.0).sqrt();
@@ -1044,5 +1053,34 @@ mod tests {
         let red_idx = doc.layers.index_of("red").unwrap();
         let e = doc.iter().next().unwrap();
         assert_eq!(e.layer, red_idx);
+    }
+
+    #[test]
+    fn malformed_input_never_panics() {
+        let cases = [
+            "",
+            "0",
+            "0\n",
+            "0\nSECTION",
+            "0\nSECTION\n2\nENTITIES\n0\nLINE",
+            // code line with no value line (odd number of lines)
+            "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10",
+            // non-numeric where numbers expected
+            "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\nNaN\n20\nx\n0\nENDSEC\n0\nEOF",
+            // POLYLINE with no VERTEX/SEQEND
+            "0\nSECTION\n2\nENTITIES\n0\nPOLYLINE\n8\n0\n0\nENDSEC\n0\nEOF",
+            // VERTEX/SEQEND with no preceding POLYLINE
+            "0\nSECTION\n2\nENTITIES\n0\nVERTEX\n10\n0\n20\n0\n0\nSEQEND\n0\nEOF",
+            // SPLINE with a single control point (below NurbsCurve minimum)
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n10\n0\n20\n0\n0\nENDSEC\n0\nEOF",
+            // bogus header units
+            "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\nzzz\n0\nENDSEC\n0\nEOF",
+            // garbage codes
+            "abc\ndef\n999999999999999999999\nx\n0\nEOF",
+            "0\nLWPOLYLINE\n90\n9999999\n10\n0\n20\n0",
+        ];
+        for c in cases {
+            let _ = import_dxf(c); // must not panic
+        }
     }
 }

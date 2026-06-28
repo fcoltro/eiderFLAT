@@ -1372,6 +1372,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn malformed_input_never_panics() {
+        let cases = [
+            "",
+            "<",
+            "<svg",
+            "<svg>",
+            "<svg><line x1=",
+            "<svg><line x1=\"5",
+            "<svg><!-- unterminated",
+            "<svg><![CDATA[ junk",
+            "<svg><line x1=\"abc\" y1=\"\" x2=\"px\"/></svg>",
+            "<svg><path d=\"\"/></svg>",
+            "<svg><path d=\"M\"/></svg>",
+            "<svg><path d=\"MLLCSQTAZ\"/></svg>",
+            "<svg><path d=\"M 0 0 C 1\"/></svg>",
+            "<svg><path d=\"A A A A A A A\"/></svg>",
+            "<svg><path d=\"m1e9 1e-9 z z z\"/></svg>",
+            "<svg><polygon points=\"0\"/></svg>",
+            "<svg><polyline points=\",,, ,\"/></svg>",
+            "<svg><rect width=\"-5\" height=\"x\"/></svg>",
+            "<svg><circle r=\"0\"/></svg>",
+            "<svg><g transform=\"matrix(\"><line/></g></svg>",
+            "<svg><g transform=\"rotate() scale(2 skew(\"></g></svg>",
+            "</g></g></svg>",
+            "<svg><g><g><g></svg>",
+            "<svg><text>caf\u{e9} \u{4e2d}\u{6587}</text></svg>",
+        ];
+        for c in cases {
+            let _ = import_svg(c); // must not panic
+        }
+    }
+
     fn close(a: (f64, f64), b: (f64, f64)) -> bool {
         (a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-5
     }
