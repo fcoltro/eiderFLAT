@@ -288,6 +288,9 @@ fn seg_intersect(
 
 fn point_in_poly(x: f64, y: f64, poly: &[(f64, f64)]) -> bool {
     let n = poly.len();
+    if n == 0 {
+        return false;
+    }
     let mut inside = false;
     let mut j = n - 1;
     for i in 0..n {
@@ -412,5 +415,10 @@ mod tests {
         assert_eq!(r.len(), 1);
         assert!(loops_contain(&r, 4.5, 4.5), "nested point still filled");
         assert!(loops_contain(&r, 0.5, 0.5), "outer ring filled");
+    }
+
+    #[test]
+    fn point_in_empty_poly_is_false_not_panic() {
+        assert!(!point_in_poly(0.0, 0.0, &[]));
     }
 }

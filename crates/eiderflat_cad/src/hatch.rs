@@ -1011,8 +1011,11 @@ fn point_in_tri(p: P, a: P, b: P, c: P) -> bool {
 }
 
 fn point_in_poly(poly: &[P], x: f64, y: f64) -> bool {
-    let mut inside = false;
     let n = poly.len();
+    if n == 0 {
+        return false;
+    }
+    let mut inside = false;
     let mut j = n - 1;
     for i in 0..n {
         let (xi, yi) = poly[i];
@@ -1029,6 +1032,11 @@ fn point_in_poly(poly: &[P], x: f64, y: f64) -> bool {
 mod tests {
     use super::*;
     use eiderflat_geometry::{CircularArc, LineSeg, PolyCurve};
+
+    #[test]
+    fn point_in_empty_poly_is_false_not_panic() {
+        assert!(!point_in_poly(&[], 0.0, 0.0));
+    }
 
     fn rect_poly(x0: i64, y0: i64, x1: i64, y1: i64) -> EntityKind {
         let segs = vec![
