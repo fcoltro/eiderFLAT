@@ -1,5 +1,6 @@
 use eiderflat_document::{
-    Color, Document, Entity, EntityKind, HatchPattern, Layer, LineTypeDef, LineTypeRef, Units,
+    Color, Document, Entity, EntityKind, HatchPattern, Layer, LineTypeDef, LineTypeRef,
+    LineWeight, Units,
 };
 use eiderflat_geometry::{
     CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
@@ -66,14 +67,24 @@ pub fn save(doc: &Document, path: &std::path::Path) -> std::io::Result<()> {
 fn write_entity(s: &mut String, e: &Entity) {
     let layer = e.layer;
     let color = color_str(&e.color);
+    let extra = format!(
+        "{} {}",
+        esc(&linetype_name(&e.line_type)),
+        line_weight_str(&e.line_weight)
+    );
     match &e.kind {
         EntityKind::Curve(Curve::Line(l)) => {
-            let _ = writeln!(s, "E LINE {layer} {color} {} {}", pt(&l.p0), pt(&l.p1));
+            let _ = writeln!(
+                s,
+                "E LINE {layer} {color} {} {} {extra}",
+                pt(&l.p0),
+                pt(&l.p1)
+            );
         }
         EntityKind::Curve(Curve::Arc(a)) => {
             let _ = writeln!(
                 s,
-                "E ARC {layer} {color} {};{} {} {} {}",
+                "E ARC {layer} {color} {};{} {} {} {} {extra}",
                 rat(a.center.x),
                 rat(a.center.y),
                 rat(a.radius),
@@ -84,7 +95,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         EntityKind::Curve(Curve::Ellipse(el)) => {
             let _ = writeln!(
                 s,
-                "E ELLIPSE {layer} {color} {};{} {} {} {} {} {}",
+                "E ELLIPSE {layer} {color} {};{} {} {} {} {} {} {extra}",
                 rat(el.center.x),
                 rat(el.center.y),
                 rat(el.semi_major),
@@ -97,7 +108,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         EntityKind::Curve(Curve::Bezier(b)) => {
             let _ = writeln!(
                 s,
-                "E BEZIER {layer} {color} {} {} {} {}",
+                "E BEZIER {layer} {color} {} {} {} {} {extra}",
                 pt(&b.p0),
                 pt(&b.p1),
                 pt(&b.p2),
@@ -107,19 +118,19 @@ fn write_entity(s: &mut String, e: &Entity) {
         EntityKind::Curve(Curve::Rational(rb)) => {
             let _ = writeln!(
                 s,
-                "E RATIONAL {layer} {color} {}",
+                "E RATIONAL {layer} {color} {} {extra}",
                 control_fields(&rb.points, &rb.weights)
             );
         }
         EntityKind::Curve(Curve::Nurbs(nc)) => {
             let _ = writeln!(
                 s,
-                "E NURBS {layer} {color} {}",
+                "E NURBS {layer} {color} {} {extra}",
                 control_fields(&nc.control, &nc.weights)
             );
         }
         EntityKind::Curve(Curve::Poly(pc)) => {
-            let _ = writeln!(s, "E POLY {layer} {color} {}", pc.segments.len());
+            let _ = writeln!(s, "E POLY {layer} {color} {} {extra}", pc.segments.len());
             for seg in &pc.segments {
                 write_segment(s, seg);
             }
@@ -132,7 +143,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         } => {
             let _ = writeln!(
                 s,
-                "E HATCH {layer} {color} {},{},{} {} {} {}",
+                "E HATCH {layer} {color} {},{},{} {} {} {} {extra}",
                 fill.0,
                 fill.1,
                 fill.2,
@@ -151,7 +162,7 @@ fn write_entity(s: &mut String, e: &Entity) {
             }
         }
         EntityKind::Point(p) => {
-            let _ = writeln!(s, "E POINT {layer} {color} {}", pt(p));
+            let _ = writeln!(s, "E POINT {layer} {color} {} {extra}", pt(p));
         }
         EntityKind::Text {
             anchor,
@@ -162,7 +173,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         } => {
             let _ = writeln!(
                 s,
-                "E TEXT {layer} {color} {} {} {} {} {}",
+                "E TEXT {layer} {color} {} {} {} {} {} {extra}",
                 pt(anchor),
                 height,
                 rotation,
@@ -179,7 +190,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         } => {
             let _ = writeln!(
                 s,
-                "E DIM {layer} {color} {} {} {} {} {}",
+                "E DIM {layer} {color} {} {} {} {} {} {extra}",
                 pt(p1),
                 pt(p2),
                 pt(line),
@@ -197,7 +208,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         } => {
             let _ = writeln!(
                 s,
-                "E DIMORTHO {layer} {color} {} {} {} {} {} {}",
+                "E DIMORTHO {layer} {color} {} {} {} {} {} {} {extra}",
                 pt(p1),
                 pt(p2),
                 pt(line),
@@ -216,7 +227,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         } => {
             let _ = writeln!(
                 s,
-                "E DIMANG {layer} {color} {} {} {} {} {} {}",
+                "E DIMANG {layer} {color} {} {} {} {} {} {} {extra}",
                 pt(center),
                 pt(p1),
                 pt(p2),
@@ -234,7 +245,7 @@ fn write_entity(s: &mut String, e: &Entity) {
         } => {
             let _ = writeln!(
                 s,
-                "E DIMRAD {layer} {color} {} {} {} {} {}",
+                "E DIMRAD {layer} {color} {} {} {} {} {} {extra}",
                 pt(center),
                 pt(edge),
                 *diameter as u8,
@@ -544,10 +555,15 @@ fn parse_entity<'a>(
         _ => None,
     };
 
+    let line_type = parse_line_type_ref(tok.next().unwrap_or("ByLayer"));
+    let line_weight = parse_line_weight(tok.next().unwrap_or("bylayer"));
+
     if let Some(k) = kind {
         let id = doc.add_on_layer(k, layer.min(doc.layers.layers.len().saturating_sub(1)));
         if let Some(e) = doc.get_mut(id) {
             e.color = color;
+            e.line_type = line_type;
+            e.line_weight = line_weight;
         }
     }
 }
@@ -713,6 +729,33 @@ fn linetype_name(lt: &LineTypeRef) -> String {
         LineTypeRef::Named(n) => n.clone(),
         LineTypeRef::ByLayer => "ByLayer".into(),
         LineTypeRef::ByBlock => "ByBlock".into(),
+    }
+}
+
+fn parse_line_type_ref(s: &str) -> LineTypeRef {
+    match s {
+        "ByLayer" => LineTypeRef::ByLayer,
+        "ByBlock" => LineTypeRef::ByBlock,
+        other => LineTypeRef::Named(unesc(other)),
+    }
+}
+
+fn line_weight_str(w: &LineWeight) -> String {
+    match w {
+        LineWeight::ByLayer => "bylayer".into(),
+        LineWeight::ByBlock => "byblock".into(),
+        LineWeight::Hundredths(h) => format!("h:{h}"),
+    }
+}
+
+fn parse_line_weight(s: &str) -> LineWeight {
+    match s {
+        "byblock" => LineWeight::ByBlock,
+        other => other
+            .strip_prefix("h:")
+            .and_then(|v| v.parse().ok())
+            .map(LineWeight::Hundredths)
+            .unwrap_or(LineWeight::ByLayer),
     }
 }
 
@@ -884,6 +927,33 @@ mod tests {
             |e| matches!(&e.kind, EntityKind::Text { content, .. } if content == "hello world"),
         );
         assert!(has_text);
+    }
+
+    #[test]
+    fn roundtrip_entity_line_type_and_line_weight() {
+        let mut doc = Document::new();
+        let id = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(5, 5),
+        ))));
+        {
+            let e = doc.get_mut(id).unwrap();
+            e.line_type = LineTypeRef::Named("Dashed".into());
+            e.line_weight = LineWeight::Hundredths(50);
+        }
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        let e2 = doc2.get(id).unwrap();
+        assert_eq!(e2.line_type, LineTypeRef::Named("Dashed".into()));
+        assert_eq!(e2.line_weight, LineWeight::Hundredths(50));
+    }
+
+    #[test]
+    fn old_format_line_without_trailing_fields_defaults_to_bylayer() {
+        let dxf_free_e2d = "E2D 1\nLAYER 0 0,0,0 1 0 0 Continuous\nE LINE 0 bylayer 0;0 5;5\n";
+        let doc = from_string(dxf_free_e2d).unwrap();
+        let e = doc.iter().next().unwrap();
+        assert_eq!(e.line_type, LineTypeRef::ByLayer);
+        assert_eq!(e.line_weight, LineWeight::ByLayer);
     }
 
     #[test]

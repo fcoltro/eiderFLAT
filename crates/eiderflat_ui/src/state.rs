@@ -1063,8 +1063,13 @@ impl AppState {
 
     pub fn hatch_at_point(&mut self, x: f64, y: f64) -> bool {
         let (boundary, holes) = match eiderflat_cad::trace_pick_region(&self.document, x, y) {
-            Some(r) => r,
-            None => {
+            Ok(r) => r,
+            Err(eiderflat_cad::PickRegionError::TooComplex) => {
+                self.command_log
+                    .push("HATCH: boundary too complex to trace (over 4000 segments)".into());
+                return false;
+            }
+            Err(eiderflat_cad::PickRegionError::NotFound) => {
                 self.command_log
                     .push("HATCH: no enclosed area found at that point".into());
                 return false;

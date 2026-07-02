@@ -23,24 +23,32 @@ struct Node {
 
 const NONE: usize = usize::MAX;
 
-pub fn clip(subject: &[Point2d], clip_poly: &[Point2d], op: BoolOp) -> Vec<Vec<Point2d>> {
-    let subj: Vec<(f64, f64)> = subject.iter().map(|p| p.to_f64()).collect();
-    let clp: Vec<(f64, f64)> = clip_poly.iter().map(|p| p.to_f64()).collect();
-    if subj.len() < 3 || clp.len() < 3 {
+pub fn clip(subject: &[Vec<Point2d>], clip_poly: &[Vec<Point2d>], op: BoolOp) -> Vec<Vec<Point2d>> {
+    let subj: Vec<Vec<(f64, f64)>> = subject
+        .iter()
+        .map(|r| r.iter().map(|p| p.to_f64()).collect())
+        .filter(|r: &Vec<(f64, f64)>| r.len() >= 3)
+        .collect();
+    let clp: Vec<Vec<(f64, f64)>> = clip_poly
+        .iter()
+        .map(|r| r.iter().map(|p| p.to_f64()).collect())
+        .filter(|r: &Vec<(f64, f64)>| r.len() >= 3)
+        .collect();
+    if subj.is_empty() || clp.is_empty() {
         return Vec::new();
     }
 
     let mut nodes: Vec<Node> = Vec::new();
-    let s_start = build_ring(&mut nodes, &subj);
-    let c_start = build_ring(&mut nodes, &clp);
+    let s_starts: Vec<usize> = subj.iter().map(|r| build_ring(&mut nodes, r)).collect();
+    let c_starts: Vec<usize> = clp.iter().map(|r| build_ring(&mut nodes, r)).collect();
 
-    let crossings = insert_intersections(&mut nodes, s_start, c_start);
+    let crossings = insert_intersections(&mut nodes, &s_starts, &c_starts);
     if crossings == 0 {
         return no_crossing_result(&subj, &clp, op);
     }
 
-    mark_entries(&mut nodes, s_start, &clp, op, true);
-    mark_entries(&mut nodes, c_start, &subj, op, false);
+    mark_entries(&mut nodes, &s_starts, &clp, op, true);
+    mark_entries(&mut nodes, &c_starts, &subj, op, false);
 
     trace(&mut nodes)
 }
@@ -63,9 +71,15 @@ fn build_ring(nodes: &mut Vec<Node>, poly: &[(f64, f64)]) -> usize {
     base
 }
 
-fn insert_intersections(nodes: &mut Vec<Node>, s_start: usize, c_start: usize) -> usize {
-    let s_edges = original_edges(nodes, s_start);
-    let c_edges = original_edges(nodes, c_start);
+fn insert_intersections(nodes: &mut Vec<Node>, s_starts: &[usize], c_starts: &[usize]) -> usize {
+    let s_edges: Vec<usize> = s_starts
+        .iter()
+        .flat_map(|&s| original_edges(nodes, s))
+        .collect();
+    let c_edges: Vec<usize> = c_starts
+        .iter()
+        .flat_map(|&c| original_edges(nodes, c))
+        .collect();
 
     struct Hit {
         se: usize,
@@ -167,10 +181,14 @@ fn original_edges(nodes: &[Node], start: usize) -> Vec<usize> {
     out
 }
 
+fn point_in_region(x: f64, y: f64, rings: &[Vec<(f64, f64)>]) -> bool {
+    rings.iter().filter(|r| point_in_poly(x, y, r)).count() % 2 == 1
+}
+
 fn mark_entries(
     nodes: &mut [Node],
-    start: usize,
-    other: &[(f64, f64)],
+    starts: &[usize],
+    other: &[Vec<(f64, f64)>],
     op: BoolOp,
     is_subject: bool,
 ) {
@@ -179,16 +197,18 @@ fn mark_entries(
         BoolOp::Union => true,
         BoolOp::Difference => is_subject,
     };
-    let mut inside = point_in_poly(nodes[start].x, nodes[start].y, other);
-    let mut cur = start;
-    loop {
-        if nodes[cur].intersection {
-            nodes[cur].entry = (!inside) ^ flip;
-            inside = !inside;
-        }
-        cur = nodes[cur].next;
-        if cur == start {
-            break;
+    for &start in starts {
+        let mut inside = point_in_region(nodes[start].x, nodes[start].y, other);
+        let mut cur = start;
+        loop {
+            if nodes[cur].intersection {
+                nodes[cur].entry = (!inside) ^ flip;
+                inside = !inside;
+            }
+            cur = nodes[cur].next;
+            if cur == start {
+                break;
+            }
         }
     }
 }
@@ -231,25 +251,36 @@ fn trace(nodes: &mut [Node]) -> Vec<Vec<Point2d>> {
     result
 }
 
-fn no_crossing_result(subj: &[(f64, f64)], clp: &[(f64, f64)], op: BoolOp) -> Vec<Vec<Point2d>> {
-    let to_pts = |poly: &[(f64, f64)]| poly.iter().map(|&(x, y)| Point2d::from_f64(x, y)).collect();
-    let s_in_c = point_in_poly(subj[0].0, subj[0].1, clp);
-    let c_in_s = point_in_poly(clp[0].0, clp[0].1, subj);
+fn no_crossing_result(
+    subj: &[Vec<(f64, f64)>],
+    clp: &[Vec<(f64, f64)>],
+    op: BoolOp,
+) -> Vec<Vec<Point2d>> {
+    let to_pts = |rings: &[Vec<(f64, f64)>]| -> Vec<Vec<Point2d>> {
+        rings
+            .iter()
+            .map(|r| r.iter().map(|&(x, y)| Point2d::from_f64(x, y)).collect())
+            .collect()
+    };
+    let s_in_c = point_in_region(subj[0][0].0, subj[0][0].1, clp);
+    let c_in_s = point_in_region(clp[0][0].0, clp[0][0].1, subj);
     match op {
         BoolOp::Union => {
             if s_in_c {
-                vec![to_pts(clp)]
+                to_pts(clp)
             } else if c_in_s {
-                vec![to_pts(subj)]
+                to_pts(subj)
             } else {
-                vec![to_pts(subj), to_pts(clp)]
+                let mut out = to_pts(subj);
+                out.extend(to_pts(clp));
+                out
             }
         }
         BoolOp::Intersection => {
             if s_in_c {
-                vec![to_pts(subj)]
+                to_pts(subj)
             } else if c_in_s {
-                vec![to_pts(clp)]
+                to_pts(clp)
             } else {
                 Vec::new()
             }
@@ -257,8 +288,12 @@ fn no_crossing_result(subj: &[(f64, f64)], clp: &[(f64, f64)], op: BoolOp) -> Ve
         BoolOp::Difference => {
             if s_in_c {
                 Vec::new()
+            } else if c_in_s {
+                let mut out = to_pts(subj);
+                out.extend(to_pts(clp));
+                out
             } else {
-                vec![to_pts(subj)]
+                to_pts(subj)
             }
         }
     }
@@ -336,7 +371,7 @@ mod tests {
     fn union_of_overlapping_squares() {
         let a = poly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
         let b = poly(&[(2.0, 2.0), (6.0, 2.0), (6.0, 6.0), (2.0, 6.0)]);
-        let r = clip(&a, &b, BoolOp::Union);
+        let r = clip(&[a], &[b], BoolOp::Union);
         assert!(!r.is_empty());
         assert!(loops_contain(&r, 1.0, 1.0), "deep in A");
         assert!(loops_contain(&r, 5.0, 5.0), "deep in B");
@@ -349,7 +384,7 @@ mod tests {
     fn intersection_of_overlapping_squares() {
         let a = poly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
         let b = poly(&[(2.0, 2.0), (6.0, 2.0), (6.0, 6.0), (2.0, 6.0)]);
-        let r = clip(&a, &b, BoolOp::Intersection);
+        let r = clip(&[a], &[b], BoolOp::Intersection);
         assert!(loops_contain(&r, 3.0, 3.0), "overlap is inside");
         assert!(!loops_contain(&r, 1.0, 1.0), "A-only is excluded");
         assert!(!loops_contain(&r, 5.0, 5.0), "B-only is excluded");
@@ -359,7 +394,7 @@ mod tests {
     fn difference_of_overlapping_squares() {
         let a = poly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
         let b = poly(&[(2.0, 2.0), (6.0, 2.0), (6.0, 6.0), (2.0, 6.0)]);
-        let r = clip(&a, &b, BoolOp::Difference);
+        let r = clip(&[a], &[b], BoolOp::Difference);
         assert!(loops_contain(&r, 1.0, 1.0), "A-only stays");
         assert!(!loops_contain(&r, 3.0, 3.0), "overlap removed");
         assert!(!loops_contain(&r, 5.0, 5.0), "B-only never in A");
@@ -368,8 +403,8 @@ mod tests {
     #[test]
     fn union_of_overlapping_circles_is_a_single_clean_region() {
         let r = clip(
-            &ngon(7.0, 6.0, 4.0, 64),
-            &ngon(12.0, 6.0, 4.0, 64),
+            &[ngon(7.0, 6.0, 4.0, 64)],
+            &[ngon(12.0, 6.0, 4.0, 64)],
             BoolOp::Union,
         );
         assert!(!r.is_empty(), "union must produce a boundary");
@@ -383,8 +418,8 @@ mod tests {
     #[test]
     fn intersection_of_overlapping_circles() {
         let r = clip(
-            &ngon(7.0, 6.0, 4.0, 64),
-            &ngon(12.0, 6.0, 4.0, 64),
+            &[ngon(7.0, 6.0, 4.0, 64)],
+            &[ngon(12.0, 6.0, 4.0, 64)],
             BoolOp::Intersection,
         );
         assert!(
@@ -401,7 +436,7 @@ mod tests {
     fn union_of_disjoint_squares_returns_both() {
         let a = poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]);
         let b = poly(&[(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0)]);
-        let r = clip(&a, &b, BoolOp::Union);
+        let r = clip(&[a], &[b], BoolOp::Union);
         assert_eq!(r.len(), 2, "disjoint union keeps both loops");
         assert!(loops_contain(&r, 0.5, 0.5));
         assert!(loops_contain(&r, 5.5, 5.5));
@@ -411,7 +446,7 @@ mod tests {
     fn union_with_nested_square_returns_outer() {
         let outer = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
         let inner = poly(&[(3.0, 3.0), (6.0, 3.0), (6.0, 6.0), (3.0, 6.0)]);
-        let r = clip(&outer, &inner, BoolOp::Union);
+        let r = clip(&[outer], &[inner], BoolOp::Union);
         assert_eq!(r.len(), 1);
         assert!(loops_contain(&r, 4.5, 4.5), "nested point still filled");
         assert!(loops_contain(&r, 0.5, 0.5), "outer ring filled");
@@ -420,5 +455,81 @@ mod tests {
     #[test]
     fn point_in_empty_poly_is_false_not_panic() {
         assert!(!point_in_poly(0.0, 0.0, &[]));
+    }
+
+    #[test]
+    fn donut_intersect_solid_circle_is_crescent() {
+        let outer = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let hole = poly(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0)]);
+        let circle = ngon(7.5, 5.0, 3.0, 64);
+        let r = clip(&[outer, hole], &[circle], BoolOp::Intersection);
+        assert!(!r.is_empty(), "crescent must be produced");
+        assert!(loops_contain(&r, 8.5, 5.0), "inside rect, in circle, outside hole");
+        assert!(!loops_contain(&r, 5.0, 5.0), "inside the hole is excluded");
+        assert!(!loops_contain(&r, 1.0, 1.0), "outside the circle is excluded");
+    }
+
+    #[test]
+    fn donut_union_donut_partially_fills_hole() {
+        let outer_a = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let hole_a = poly(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0)]);
+        let outer_b = poly(&[(4.0, 4.0), (4.0, 6.0), (6.0, 6.0), (6.0, 4.0)]);
+        let r = clip(&[outer_a, hole_a], &[outer_b], BoolOp::Union);
+        assert!(loops_contain(&r, 5.0, 5.0), "B fills part of A's hole");
+        assert!(!loops_contain(&r, 3.5, 5.0), "still a hole where B doesn't reach");
+        assert!(loops_contain(&r, 1.0, 1.0), "A's solid material stays");
+    }
+
+    #[test]
+    fn donut_difference_solid_rectangle_keeps_hole() {
+        let outer = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let hole = poly(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0)]);
+        let cut = poly(&[(8.0, 8.0), (8.0, 9.0), (9.0, 9.0), (9.0, 8.0)]);
+        let r = clip(&[outer, hole], &[cut], BoolOp::Difference);
+        assert!(!loops_contain(&r, 5.0, 5.0), "hole must survive");
+        assert!(!loops_contain(&r, 8.5, 8.5), "cut corner removed");
+        assert!(loops_contain(&r, 1.0, 1.0), "solid material stays");
+    }
+
+    #[test]
+    fn donut_xor_solid_circle() {
+        let outer = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let hole = poly(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0)]);
+        let circle = ngon(7.5, 5.0, 3.0, 64);
+        let mut r = clip(
+            &[outer.clone(), hole.clone()],
+            std::slice::from_ref(&circle),
+            BoolOp::Difference,
+        );
+        r.extend(clip(&[circle], &[outer, hole], BoolOp::Difference));
+        assert!(loops_contain(&r, 10.2, 5.0), "circle-only part stays");
+        assert!(!loops_contain(&r, 8.5, 5.0), "overlap excluded from xor");
+    }
+
+    #[test]
+    fn circle_fully_inside_donut_hole_no_crossing_variants() {
+        let outer = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let hole = poly(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0)]);
+        let circle = ngon(5.0, 5.0, 1.0, 32);
+
+        let u = clip(
+            &[outer.clone(), hole.clone()],
+            std::slice::from_ref(&circle),
+            BoolOp::Union,
+        );
+        assert!(loops_contain(&u, 5.0, 5.0), "circle survives as a disjoint island");
+        assert!(loops_contain(&u, 1.0, 1.0), "donut solid material stays");
+        assert!(!loops_contain(&u, 3.5, 5.0), "the rest of the hole stays empty");
+
+        let i = clip(
+            &[outer.clone(), hole.clone()],
+            std::slice::from_ref(&circle),
+            BoolOp::Intersection,
+        );
+        assert!(i.is_empty(), "circle in the hole never overlaps donut material");
+
+        let d = clip(&[outer, hole], &[circle], BoolOp::Difference);
+        assert!(loops_contain(&d, 1.0, 1.0), "donut is unmodified");
+        assert!(!loops_contain(&d, 5.0, 5.0), "hole is still a hole");
     }
 }

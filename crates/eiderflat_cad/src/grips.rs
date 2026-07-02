@@ -442,12 +442,12 @@ pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
     }
 }
 
-struct EditPoint {
-    pos: Point2d,
-    writes: Vec<(usize, u8)>,
+pub(crate) struct EditPoint {
+    pub(crate) pos: Point2d,
+    pub(crate) writes: Vec<(usize, u8)>,
 }
 
-fn poly_edit_points(poly: &PolyCurve) -> Vec<EditPoint> {
+pub(crate) fn poly_edit_points(poly: &PolyCurve) -> Vec<EditPoint> {
     let mut pts: Vec<EditPoint> = Vec::new();
     let mut last_node: Option<usize> = None;
     for (s, seg) in poly.segments.iter().enumerate() {
@@ -496,7 +496,7 @@ fn poly_edit_points(poly: &PolyCurve) -> Vec<EditPoint> {
     pts
 }
 
-fn set_poly_ctrl(seg: &mut Curve, ci: u8, to: Point2d) {
+pub(crate) fn set_poly_ctrl(seg: &mut Curve, ci: u8, to: Point2d) {
     match seg {
         Curve::Line(l) => {
             if ci == 0 {
@@ -629,7 +629,7 @@ fn along(base: Point2d, toward: Point2d, fallback: Point2d, dist: f64) -> Point2
     Point2d::from_f64(base.x + dx / len * dist, base.y + dy / len * dist)
 }
 
-fn with_angles(arc: &CircularArc, start: f64, mut end: f64) -> CircularArc {
+pub(crate) fn with_angles(arc: &CircularArc, start: f64, mut end: f64) -> CircularArc {
     let two_pi = 2.0 * std::f64::consts::PI;
     let start = start.rem_euclid(two_pi);
     while end <= start {

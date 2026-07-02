@@ -181,6 +181,22 @@ fn apply_color(doc: &mut Document, id: eiderflat_document::EntityId, color: &Opt
     }
 }
 
+/// Explicit per-entity line type, if any. Absent means ByLayer (the default).
+fn entity_line_type(rec: &[Pair]) -> Option<LineTypeRef> {
+    let name = rec.iter().find(|p| p.code == 6)?.value.as_str();
+    Some(match name {
+        "BYLAYER" => LineTypeRef::ByLayer,
+        "BYBLOCK" => LineTypeRef::ByBlock,
+        other => LineTypeRef::Named(other.to_string()),
+    })
+}
+
+fn apply_line_type(doc: &mut Document, id: eiderflat_document::EntityId, lt: &Option<LineTypeRef>) {
+    if let (Some(l), Some(e)) = (lt, doc.get_mut(id)) {
+        e.line_type = l.clone();
+    }
+}
+
 fn parse_entities(pairs: &[Pair], doc: &mut Document) {
     let recs = records(pairs);
     let mut idx = 0;
@@ -193,6 +209,7 @@ fn parse_entities(pairs: &[Pair], doc: &mut Document) {
         }
         let layer_idx = entity_layer(rec, doc);
         let color = entity_color(rec);
+        let line_type = entity_line_type(rec);
 
         // Old-style POLYLINE: geometry lives in following VERTEX records up to SEQEND.
         if kind == "POLYLINE" {
@@ -224,6 +241,7 @@ fn parse_entities(pairs: &[Pair], doc: &mut Document) {
             if let Some(k) = build_poly(&verts, closed) {
                 let id = doc.add_on_layer(k, layer_idx);
                 apply_color(doc, id, &color);
+                apply_line_type(doc, id, &line_type);
             }
             continue;
         }
@@ -243,6 +261,7 @@ fn parse_entities(pairs: &[Pair], doc: &mut Document) {
         for k in entities {
             let id = doc.add_on_layer(k, layer_idx);
             apply_color(doc, id, &color);
+            apply_line_type(doc, id, &line_type);
         }
     }
 }
@@ -252,8 +271,11 @@ fn get(rec: &[Pair], code: i32) -> Option<f64> {
 }
 
 fn parse_line(rec: &[Pair]) -> Vec<EntityKind> {
-    let (x1, y1) = (get(rec, 10).unwrap_or(0.0), get(rec, 20).unwrap_or(0.0));
-    let (x2, y2) = (get(rec, 11).unwrap_or(0.0), get(rec, 21).unwrap_or(0.0));
+    let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+        (get(rec, 10), get(rec, 20), get(rec, 11), get(rec, 21))
+    else {
+        return vec![];
+    };
     vec![EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
         Point2d::from_f64(x1, y1),
         Point2d::from_f64(x2, y2),
@@ -261,8 +283,9 @@ fn parse_line(rec: &[Pair]) -> Vec<EntityKind> {
 }
 
 fn parse_circle(rec: &[Pair]) -> Vec<EntityKind> {
-    let (cx, cy) = (get(rec, 10).unwrap_or(0.0), get(rec, 20).unwrap_or(0.0));
-    let r = get(rec, 40).unwrap_or(1.0);
+    let (Some(cx), Some(cy), Some(r)) = (get(rec, 10), get(rec, 20), get(rec, 40)) else {
+        return vec![];
+    };
     vec![EntityKind::Curve(Curve::Arc(CircularArc::new(
         Point2d::from_f64(cx, cy),
         r,
@@ -272,8 +295,9 @@ fn parse_circle(rec: &[Pair]) -> Vec<EntityKind> {
 }
 
 fn parse_arc(rec: &[Pair]) -> Vec<EntityKind> {
-    let (cx, cy) = (get(rec, 10).unwrap_or(0.0), get(rec, 20).unwrap_or(0.0));
-    let r = get(rec, 40).unwrap_or(1.0);
+    let (Some(cx), Some(cy), Some(r)) = (get(rec, 10), get(rec, 20), get(rec, 40)) else {
+        return vec![];
+    };
     let start = get(rec, 50).unwrap_or(0.0) * DEG;
     let end = get(rec, 51).unwrap_or(360.0) * DEG;
     vec![EntityKind::Curve(Curve::Arc(CircularArc::new(
@@ -285,8 +309,11 @@ fn parse_arc(rec: &[Pair]) -> Vec<EntityKind> {
 }
 
 fn parse_ellipse(rec: &[Pair]) -> Vec<EntityKind> {
-    let (cx, cy) = (get(rec, 10).unwrap_or(0.0), get(rec, 20).unwrap_or(0.0));
-    let (mx, my) = (get(rec, 11).unwrap_or(1.0), get(rec, 21).unwrap_or(0.0));
+    let (Some(cx), Some(cy), Some(mx), Some(my)) =
+        (get(rec, 10), get(rec, 20), get(rec, 11), get(rec, 21))
+    else {
+        return vec![];
+    };
     let ratio = get(rec, 40).unwrap_or(1.0);
     let start = get(rec, 41).unwrap_or(0.0);
     let end = get(rec, 42).unwrap_or(TAU);
@@ -303,7 +330,9 @@ fn parse_ellipse(rec: &[Pair]) -> Vec<EntityKind> {
 }
 
 fn parse_point(rec: &[Pair]) -> Vec<EntityKind> {
-    let (x, y) = (get(rec, 10).unwrap_or(0.0), get(rec, 20).unwrap_or(0.0));
+    let (Some(x), Some(y)) = (get(rec, 10), get(rec, 20)) else {
+        return vec![];
+    };
     vec![EntityKind::Point(Point2d::from_f64(x, y))]
 }
 
@@ -539,12 +568,13 @@ pub fn export_dxf(doc: &Document) -> String {
             .map(|l| l.name.clone())
             .unwrap_or_else(|| "0".into());
         let color = aci_of(&e.color);
+        let line_type = linetype_code6_of(&e.line_type);
         if let Some(prims) =
             crate::dim::dimension_primitives(&e.kind, &doc.settings.dim_style, doc.settings.units)
         {
-            dimension_to_dxf(&mut w, &prims, &layer_name, color);
+            dimension_to_dxf(&mut w, &prims, &layer_name, color, line_type);
         } else {
-            write_entity(&mut w, &e.kind, &layer_name, color);
+            write_entity(&mut w, &e.kind, &layer_name, color, line_type);
         }
     }
     w(0, "ENDSEC");
@@ -557,10 +587,11 @@ fn dimension_to_dxf(
     prims: &crate::dim::DimPrimitives,
     layer: &str,
     color: Option<i32>,
+    line_type: Option<&str>,
 ) {
     for (a, b) in &prims.segs {
         w(0, "LINE");
-        emit_layer(w, layer, color);
+        emit_layer(w, layer, color, line_type);
         w(10, &fmt(a.x));
         w(20, &fmt(a.y));
         w(11, &fmt(b.x));
@@ -568,7 +599,7 @@ fn dimension_to_dxf(
     }
     if let Some(t) = &prims.text {
         w(0, "TEXT");
-        emit_layer(w, layer, color);
+        emit_layer(w, layer, color, line_type);
         w(10, &fmt(t.anchor.x));
         w(20, &fmt(t.anchor.y));
         w(40, &fmt(t.height));
@@ -581,11 +612,17 @@ fn dimension_to_dxf(
     }
 }
 
-fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, color: Option<i32>) {
+fn write_entity(
+    w: &mut impl FnMut(i32, &str),
+    kind: &EntityKind,
+    layer: &str,
+    color: Option<i32>,
+    line_type: Option<&str>,
+) {
     match kind {
         EntityKind::Curve(Curve::Line(l)) => {
             w(0, "LINE");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             let (x1, y1) = l.p0.to_f64();
             let (x2, y2) = l.p1.to_f64();
             w(10, &fmt(x1));
@@ -598,13 +635,13 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
             let span = (a.end_angle - a.start_angle).abs();
             if (span - TAU).abs() < 1e-9 {
                 w(0, "CIRCLE");
-                emit_layer(w, layer, color);
+                emit_layer(w, layer, color, line_type);
                 w(10, &fmt(cx));
                 w(20, &fmt(cy));
                 w(40, &fmt(a.radius));
             } else {
                 w(0, "ARC");
-                emit_layer(w, layer, color);
+                emit_layer(w, layer, color, line_type);
                 w(10, &fmt(cx));
                 w(20, &fmt(cy));
                 w(40, &fmt(a.radius));
@@ -623,7 +660,7 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
                 1.0
             };
             w(0, "ELLIPSE");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             w(10, &fmt(cx));
             w(20, &fmt(cy));
             w(11, &fmt(mx));
@@ -635,7 +672,7 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
         EntityKind::Curve(Curve::Bezier(b)) => {
             let verts = crate::flatten_for_export(&Curve::Bezier(b.clone()));
             w(0, "LWPOLYLINE");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             w(90, &verts.len().to_string());
             w(70, "0");
             for p in &verts {
@@ -646,7 +683,7 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
         EntityKind::Curve(Curve::Rational(rb)) => {
             let verts = crate::flatten_for_export(&Curve::Rational(rb.clone()));
             w(0, "LWPOLYLINE");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             w(90, &verts.len().to_string());
             w(70, "0");
             for p in &verts {
@@ -657,7 +694,7 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
         EntityKind::Curve(Curve::Nurbs(nc)) => {
             let verts = crate::flatten_for_export(&Curve::Nurbs(nc.clone()));
             w(0, "LWPOLYLINE");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             w(90, &verts.len().to_string());
             w(70, "0");
             for p in &verts {
@@ -666,12 +703,12 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
             }
         }
         EntityKind::Curve(Curve::Poly(pc)) => {
-            write_polyline(w, pc, layer, color);
+            write_polyline(w, pc, layer, color, line_type);
         }
         EntityKind::Point(p) => {
             let (x, y) = p.to_f64();
             w(0, "POINT");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             w(10, &fmt(x));
             w(20, &fmt(y));
         }
@@ -684,7 +721,7 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
         } => {
             let (x, y) = anchor.to_f64();
             w(0, "TEXT");
-            emit_layer(w, layer, color);
+            emit_layer(w, layer, color, line_type);
             w(10, &fmt(x));
             w(20, &fmt(y));
             w(40, &fmt(*height));
@@ -694,16 +731,22 @@ fn write_entity(w: &mut impl FnMut(i32, &str), kind: &EntityKind, layer: &str, c
         EntityKind::Hatch {
             boundary, holes, ..
         } => {
-            write_polyline(w, &PolyCurve::new(boundary.clone()), layer, color);
+            write_polyline(w, &PolyCurve::new(boundary.clone()), layer, color, line_type);
             for hole in holes {
-                write_polyline(w, &PolyCurve::new(hole.clone()), layer, color);
+                write_polyline(w, &PolyCurve::new(hole.clone()), layer, color, line_type);
             }
         }
         _ => {}
     }
 }
 
-fn write_polyline(w: &mut impl FnMut(i32, &str), pc: &PolyCurve, layer: &str, color: Option<i32>) {
+fn write_polyline(
+    w: &mut impl FnMut(i32, &str),
+    pc: &PolyCurve,
+    layer: &str,
+    color: Option<i32>,
+    line_type: Option<&str>,
+) {
     let mut verts: Vec<(f64, f64, f64)> = Vec::new();
     for seg in &pc.segments {
         match seg {
@@ -751,7 +794,7 @@ fn write_polyline(w: &mut impl FnMut(i32, &str), pc: &PolyCurve, layer: &str, co
     }
 
     w(0, "LWPOLYLINE");
-    emit_layer(w, layer, color);
+    emit_layer(w, layer, color, line_type);
     w(90, &verts.len().to_string());
     w(70, if closed { "1" } else { "0" });
     for (x, y, bulge) in &verts {
@@ -767,11 +810,19 @@ fn fmt(x: f64) -> String {
     format!("{:.9}", x)
 }
 
-/// Writes the layer (code 8) plus an optional explicit colour (code 62).
-fn emit_layer(w: &mut impl FnMut(i32, &str), layer: &str, color: Option<i32>) {
+/// Writes the layer (code 8) plus an optional explicit colour (code 62) and line type (code 6).
+fn emit_layer(
+    w: &mut impl FnMut(i32, &str),
+    layer: &str,
+    color: Option<i32>,
+    line_type: Option<&str>,
+) {
     w(8, layer);
     if let Some(c) = color {
         w(62, &c.to_string());
+    }
+    if let Some(lt) = line_type {
+        w(6, lt);
     }
 }
 
@@ -779,6 +830,14 @@ fn emit_layer(w: &mut impl FnMut(i32, &str), layer: &str, color: Option<i32>) {
 fn aci_of(color: &Color) -> Option<i32> {
     match color {
         Color::Rgb(r, g, b) => Some(aci_for((*r, *g, *b), true)),
+        _ => None,
+    }
+}
+
+/// Maps an explicit named entity line type to a DXF code-6 name; ByLayer/ByBlock inherit.
+fn linetype_code6_of(lt: &LineTypeRef) -> Option<&str> {
+    match lt {
+        LineTypeRef::Named(n) => Some(n.as_str()),
         _ => None,
     }
 }
@@ -828,6 +887,35 @@ mod tests {
         let doc2 = import_dxf(&dxf);
         let e = doc2.iter().next().unwrap();
         assert_eq!(e.color, Color::Rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn entity_line_type_roundtrip() {
+        let mut doc = Document::new();
+        let id = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt(0, 0),
+            pt(1, 1),
+        ))));
+        doc.get_mut(id).unwrap().line_type = LineTypeRef::Named("Dashed".into());
+        let dxf = export_dxf(&doc);
+        let doc2 = import_dxf(&dxf);
+        let e = doc2.iter().next().unwrap();
+        assert_eq!(e.line_type, LineTypeRef::Named("Dashed".into()));
+    }
+
+    #[test]
+    fn entity_bylayer_line_type_emits_no_code_6() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt(0, 0),
+            pt(1, 1),
+        ))));
+        let dxf = export_dxf(&doc);
+        let entities_section = dxf.split("2\nENTITIES\n").nth(1).unwrap();
+        assert!(
+            !entities_section.contains("6\n"),
+            "ByLayer entity must not emit an explicit code-6 line type"
+        );
     }
 
     #[test]

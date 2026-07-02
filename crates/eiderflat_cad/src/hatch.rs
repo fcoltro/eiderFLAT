@@ -230,7 +230,9 @@ pub fn triangulate_with_tol(
         .filter(|p| p.len() >= 3)
         .collect();
 
-    let merged = bridge_holes(outer, hole_polys);
+    let Some(merged) = bridge_holes(outer, hole_polys) else {
+        return Vec::new();
+    };
     ear_clip(&merged)
 }
 
@@ -278,8 +280,9 @@ pub fn triangulate_contours(contours: &[Curve], tol: f64) -> Vec<[Point2d; 3]> {
                 h
             })
             .collect();
-        let merged = bridge_holes(outer, hole_polys);
-        tris.extend(ear_clip(&merged));
+        if let Some(merged) = bridge_holes(outer, hole_polys) {
+            tris.extend(ear_clip(&merged));
+        }
     }
     tris
 }
@@ -323,7 +326,7 @@ fn default_flatten_tol(boundary: &[Curve]) -> f64 {
     (region_diag(boundary) * 5e-4).max(1e-6)
 }
 
-fn bridge_holes(outer: Vec<P>, mut holes: Vec<Vec<P>>) -> Vec<P> {
+fn bridge_holes(outer: Vec<P>, mut holes: Vec<Vec<P>>) -> Option<Vec<P>> {
     holes.sort_by(|a, b| {
         max_x(b)
             .partial_cmp(&max_x(a))
@@ -331,12 +334,29 @@ fn bridge_holes(outer: Vec<P>, mut holes: Vec<Vec<P>>) -> Vec<P> {
     });
     let mut poly = outer;
     for hole in holes {
-        poly = merge_one_hole(poly, &hole);
+        poly = merge_one_hole(poly, &hole)?;
     }
-    poly
+    Some(poly)
 }
 
-fn merge_one_hole(outer: Vec<P>, hole: &[P]) -> Vec<P> {
+fn bridge_edge_crossing(outer: &[P], my: f64, mx: f64) -> Option<usize> {
+    let n = outer.len();
+    let mut best = MinTracker::new();
+    for i in 0..n {
+        let a = outer[i];
+        let b = outer[(i + 1) % n];
+        if (a.1 <= my && b.1 > my) || (b.1 <= my && a.1 > my) {
+            let t = (my - a.1) / (b.1 - a.1);
+            let x = a.0 + t * (b.0 - a.0);
+            if x >= mx - 1e-9 {
+                best.offer(x, i);
+            }
+        }
+    }
+    best.value()
+}
+
+fn merge_one_hole(outer: Vec<P>, hole: &[P]) -> Option<Vec<P>> {
     let mi = (0..hole.len())
         .max_by(|&a, &b| {
             hole[a]
@@ -347,21 +367,10 @@ fn merge_one_hole(outer: Vec<P>, hole: &[P]) -> Vec<P> {
         .unwrap();
     let m = hole[mi];
     let n = outer.len();
-    let mut best = MinTracker::new();
-    for i in 0..n {
-        let a = outer[i];
-        let b = outer[(i + 1) % n];
-        if (a.1 <= m.1 && b.1 > m.1) || (b.1 <= m.1 && a.1 > m.1) {
-            let t = (m.1 - a.1) / (b.1 - a.1);
-            let x = a.0 + t * (b.0 - a.0);
-            if x >= m.0 - 1e-9 {
-                best.offer(x, i);
-            }
-        }
-    }
-    let Some(ei) = best.value() else {
-        return outer;
-    };
+    let eps = m.1.abs().max(1.0) * 1e-9;
+    let ei = bridge_edge_crossing(&outer, m.1, m.0)
+        .or_else(|| bridge_edge_crossing(&outer, m.1 + eps, m.0))
+        .or_else(|| bridge_edge_crossing(&outer, m.1 - eps, m.0))?;
     let (a, b) = (outer[ei], outer[(ei + 1) % n]);
     let pidx = if a.0 >= b.0 { ei } else { (ei + 1) % n };
 
@@ -373,7 +382,7 @@ fn merge_one_hole(outer: Vec<P>, hole: &[P]) -> Vec<P> {
     out.push(hole[mi]);
     out.push(outer[pidx]);
     out.extend_from_slice(&outer[pidx + 1..]);
-    out
+    Some(out)
 }
 
 fn ear_clip(poly: &[P]) -> Vec<[Point2d; 3]> {
@@ -427,13 +436,19 @@ fn ear_clip(poly: &[P]) -> Vec<[Point2d; 3]> {
     tris
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickRegionError {
+    NotFound,
+    TooComplex,
+}
+
 pub fn trace_pick_region(
     doc: &Document,
     px: f64,
     py: f64,
-) -> Option<(Vec<Curve>, Vec<Vec<Curve>>)> {
+) -> Result<(Vec<Curve>, Vec<Vec<Curve>>), PickRegionError> {
     if let Some(region) = region_from_closed_loops(doc, px, py) {
-        return Some(region);
+        return Ok(region);
     }
     trace_pick_region_arrangement(doc, px, py)
 }
@@ -581,10 +596,13 @@ fn trace_pick_region_arrangement(
     doc: &Document,
     px: f64,
     py: f64,
-) -> Option<(Vec<Curve>, Vec<Vec<Curve>>)> {
+) -> Result<(Vec<Curve>, Vec<Vec<Curve>>), PickRegionError> {
     let segs = split_at_intersections(collect_segments(doc));
-    if segs.len() < 3 || segs.len() > 4000 {
-        return None;
+    if segs.len() < 3 {
+        return Err(PickRegionError::NotFound);
+    }
+    if segs.len() > 4000 {
+        return Err(PickRegionError::TooComplex);
     }
 
     let mut nodes: Vec<P> = Vec::new();
@@ -661,7 +679,8 @@ fn trace_pick_region_arrangement(
             signed_area(a)
                 .partial_cmp(&signed_area(b))
                 .unwrap_or(std::cmp::Ordering::Equal)
-        })?
+        })
+        .ok_or(PickRegionError::NotFound)?
         .clone();
 
     let parts = source_parts(doc);
@@ -671,7 +690,7 @@ fn trace_pick_region_arrangement(
         .map(|p| recurve_loop(&poly_to_curves(p), &parts))
         .collect();
 
-    Some((recurve_loop(&poly_to_curves(&outer), &parts), holes))
+    Ok((recurve_loop(&poly_to_curves(&outer), &parts), holes))
 }
 
 fn collect_segments(doc: &Document) -> Vec<(P, P)> {
@@ -1174,6 +1193,43 @@ mod tests {
         let (boundary, holes) = trace_pick_region(&doc, 2.0, 2.0).expect("encloses the click");
         assert!(holes.is_empty());
         assert!(region_contains(&boundary, &[], 2.0, 2.0));
+    }
+
+    #[test]
+    fn bridge_edge_crossing_misses_exact_vertex_tie() {
+        let outer = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        assert!(
+            bridge_edge_crossing(&outer, 10.0, 4.0).is_none(),
+            "a ray exactly through the top edge's y misses every edge"
+        );
+        assert!(bridge_edge_crossing(&outer, 9.999, 4.0).is_some());
+    }
+
+    #[test]
+    fn merge_one_hole_recovers_from_exact_vertex_tie() {
+        let outer = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let hole = vec![(3.0, 8.5), (4.0, 10.0), (3.0, 9.5)];
+        let merged =
+            merge_one_hole(outer, &hole).expect("the epsilon retry finds a bridge edge");
+        assert_eq!(merged.len(), 4 + 3 + 2, "outer + hole + bridge duplication");
+    }
+
+    #[test]
+    fn trace_pick_region_reports_too_complex_not_not_found() {
+        let mut doc = Document::new();
+        let n = 4001;
+        for i in 0..n {
+            let a = TAU * i as f64 / n as f64;
+            let b = TAU * (i + 1) as f64 / n as f64;
+            doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(10.0 * a.cos(), 10.0 * a.sin()),
+                Point2d::from_f64(10.0 * b.cos(), 10.0 * b.sin()),
+            ))));
+        }
+        match trace_pick_region(&doc, 0.0, 0.0) {
+            Err(PickRegionError::TooComplex) => {}
+            other => panic!("expected TooComplex, got {other:?}"),
+        }
     }
 
     #[test]

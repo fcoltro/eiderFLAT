@@ -1260,6 +1260,13 @@ fn set_arc_angle(arc: &mut CircularArc, set_end: bool, new_angle: f64) {
     }
 }
 
+fn arc_point(arc: &CircularArc, angle: f64) -> Point2d {
+    Point2d::from_f64(
+        arc.center.x + arc.radius * angle.cos(),
+        arc.center.y + arc.radius * angle.sin(),
+    )
+}
+
 pub fn stretch(
     doc: &mut Document,
     ids: &[EntityId],
@@ -1289,6 +1296,53 @@ pub fn stretch(
                     bz.p1 = nudge(&bz.p1);
                     bz.p2 = nudge(&bz.p2);
                     bz.p3 = nudge(&bz.p3);
+                }
+                EntityKind::Curve(Curve::Rational(rb)) => {
+                    for p in &mut rb.points {
+                        *p = nudge(p);
+                    }
+                }
+                EntityKind::Curve(Curve::Nurbs(nc)) => {
+                    for p in &mut nc.control {
+                        *p = nudge(p);
+                    }
+                }
+                EntityKind::Curve(Curve::Poly(pc)) => {
+                    let edit_pts = crate::grips::poly_edit_points(pc);
+                    let mut segs = pc.segments.clone();
+                    for ep in &edit_pts {
+                        if inside(ep.pos.x, ep.pos.y) {
+                            let moved = nudge(&ep.pos);
+                            for &(s, ci) in &ep.writes {
+                                if let Some(seg) = segs.get_mut(s) {
+                                    crate::grips::set_poly_ctrl(seg, ci, moved);
+                                }
+                            }
+                        }
+                    }
+                    **pc = PolyCurve::new(segs);
+                }
+                EntityKind::Curve(Curve::Arc(arc)) => {
+                    if inside(arc.center.x, arc.center.y) {
+                        arc.center = nudge(&arc.center);
+                    }
+                    let start_pt = arc_point(arc, arc.start_angle);
+                    if inside(start_pt.x, start_pt.y) {
+                        let moved = nudge(&start_pt);
+                        let a = (moved.y - arc.center.y).atan2(moved.x - arc.center.x);
+                        *arc = crate::grips::with_angles(arc, a, arc.end_angle);
+                    }
+                    let end_pt = arc_point(arc, arc.end_angle);
+                    if inside(end_pt.x, end_pt.y) {
+                        let moved = nudge(&end_pt);
+                        let a = (moved.y - arc.center.y).atan2(moved.x - arc.center.x);
+                        *arc = crate::grips::with_angles(arc, arc.start_angle, a);
+                    }
+                }
+                EntityKind::Curve(Curve::Ellipse(el)) => {
+                    if inside(el.center.x, el.center.y) {
+                        el.center = nudge(&el.center);
+                    }
                 }
                 EntityKind::Point(p) => {
                     *p = nudge(p);
@@ -2524,6 +2578,96 @@ mod tests {
                 (x - 10.0).abs() < 1e-6 && (y - 5.0).abs() < 1e-6,
                 "stretched end ({x},{y})"
             );
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn stretch_arc_endpoint_moves_only_that_endpoint() {
+        let mut doc = Document::new();
+        let id = draw::arc(&mut doc, pt(0, 0), 5.0, 0.0, std::f64::consts::FRAC_PI_2);
+        let start = arc_point(&CircularArc::new(pt(0, 0), 5.0, 0.0, std::f64::consts::FRAC_PI_2), 0.0);
+        stretch(
+            &mut doc,
+            &[id],
+            (start.x - 1.0, start.y - 1.0, start.x + 1.0, start.y + 1.0),
+            0.0,
+            5.0,
+        );
+        if let Curve::Arc(a) = doc.get(id).unwrap().as_curve().unwrap() {
+            assert!((a.center.x - 0.0).abs() < 1e-6 && (a.center.y - 0.0).abs() < 1e-6);
+            assert!((a.radius - 5.0).abs() < 1e-6);
+            let new_start = arc_point(a, a.start_angle);
+            let expected_angle = (start.y + 5.0 - a.center.y).atan2(start.x - a.center.x);
+            let expected = arc_point(a, expected_angle);
+            assert!(
+                (new_start.x - expected.x).abs() < 1e-3 && (new_start.y - expected.y).abs() < 1e-3,
+                "start endpoint moved onto the same circle in the nudged direction: {new_start:?}"
+            );
+            let end = arc_point(a, a.end_angle);
+            assert!(
+                (end.x - 0.0).abs() < 1e-3 && (end.y - 5.0).abs() < 1e-3,
+                "end endpoint untouched: {end:?}"
+            );
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn stretch_arc_center_translates_whole_arc() {
+        let mut doc = Document::new();
+        let id = draw::arc(&mut doc, pt(0, 0), 5.0, 0.0, std::f64::consts::FRAC_PI_2);
+        stretch(&mut doc, &[id], (-1.0, -1.0, 1.0, 1.0), 3.0, 4.0);
+        if let Curve::Arc(a) = doc.get(id).unwrap().as_curve().unwrap() {
+            assert!((a.center.x - 3.0).abs() < 1e-6 && (a.center.y - 4.0).abs() < 1e-6);
+            assert!((a.radius - 5.0).abs() < 1e-6);
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn stretch_polyline_joint_moves_shared_vertex_in_both_segments() {
+        let mut doc = Document::new();
+        let id = draw::polycurve(
+            &mut doc,
+            vec![
+                Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(5, 0))),
+                Curve::Line(LineSeg::from_endpoints(pt(5, 0), pt(5, 5))),
+            ],
+        );
+        stretch(&mut doc, &[id], (4.0, -1.0, 6.0, 1.0), 0.0, 2.0);
+        if let Curve::Poly(pc) = doc.get(id).unwrap().as_curve().unwrap() {
+            if let (Curve::Line(l0), Curve::Line(l1)) = (&pc.segments[0], &pc.segments[1]) {
+                assert!((l0.p1.x - 5.0).abs() < 1e-6 && (l0.p1.y - 2.0).abs() < 1e-6);
+                assert!((l1.p0.x - 5.0).abs() < 1e-6 && (l1.p0.y - 2.0).abs() < 1e-6);
+                assert!((l0.p0.x - 0.0).abs() < 1e-6 && (l0.p0.y - 0.0).abs() < 1e-6);
+                assert!((l1.p1.x - 5.0).abs() < 1e-6 && (l1.p1.y - 5.0).abs() < 1e-6);
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn stretch_nurbs_control_point_moves_only_that_point() {
+        use eiderflat_geometry::NurbsCurve;
+        let mut doc = Document::new();
+        let control = vec![pt(0, 0), pt(5, 5), pt(10, 5), pt(15, 0)];
+        let id = doc.add(EntityKind::Curve(Curve::Nurbs(NurbsCurve::new(
+            control.clone(),
+            vec![1.0; 4],
+        ))));
+        stretch(&mut doc, &[id], (4.0, 4.0, 6.0, 6.0), 1.0, 1.0);
+        if let Curve::Nurbs(nc) = doc.get(id).unwrap().as_curve().unwrap() {
+            assert!((nc.control[0].x - 0.0).abs() < 1e-6 && (nc.control[0].y - 0.0).abs() < 1e-6);
+            assert!((nc.control[1].x - 6.0).abs() < 1e-6 && (nc.control[1].y - 6.0).abs() < 1e-6);
+            assert!((nc.control[2].x - 10.0).abs() < 1e-6 && (nc.control[2].y - 5.0).abs() < 1e-6);
+            assert!((nc.control[3].x - 15.0).abs() < 1e-6 && (nc.control[3].y - 0.0).abs() < 1e-6);
         } else {
             panic!()
         }
